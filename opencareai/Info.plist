@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>We need access to write new information, such as medications from your visits, to the Health app.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Your health data is used to populate your profile and provide more accurate insights.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>ServerURL</key>
+	<string>https://opencare-gpt.vercel.app</string>
+</dict>
+</plist>
