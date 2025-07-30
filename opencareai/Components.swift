@@ -453,4 +453,202 @@ struct EnhancedTextFieldStyle: TextFieldStyle {
             )
             .shadow(color: .black.opacity(0.05), radius: 2, x: 0, y: 1)
     }
+}
+
+// MARK: - Delete Account Confirmation View
+struct DeleteAccountConfirmationView: View {
+    @Binding var password: String
+    @ObservedObject var authViewModel: AuthViewModel
+    @Binding var isPresented: Bool
+    @State private var showPassword = false
+    @State private var attemptedSimpleDelete = false
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                // Warning Icon
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(.red)
+                    .padding(.top, 20)
+                
+                // Title and Warning Text
+                VStack(spacing: 16) {
+                    Text("Delete Account")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.red)
+                    
+                    Text("This action cannot be undone and will permanently delete all your data including visits, medications, and health information.")
+                        .font(.body)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal)
+                }
+                
+                // Error Message
+                if let errorMessage = authViewModel.errorMessage {
+                    Text(errorMessage)
+                        .foregroundColor(.red)
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                        .padding()
+                        .background(Color.red.opacity(0.1))
+                        .cornerRadius(8)
+                }
+                
+                Spacer()
+                
+                // Action Buttons
+                VStack(spacing: 12) {
+                    // If we haven't attempted simple delete yet, try that first
+                    if !attemptedSimpleDelete {
+                        Button(action: {
+                            attemptedSimpleDelete = true
+                            Task {
+                                await authViewModel.deleteAccount()
+                                if authViewModel.errorMessage == nil {
+                                    isPresented = false
+                                }
+                            }
+                        }) {
+                            HStack {
+                                if authViewModel.isLoading {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .foregroundColor(.white)
+                                } else {
+                                    Image(systemName: "trash.fill")
+                                }
+                                Text("Delete My Account")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.red)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                            .fontWeight(.semibold)
+                        }
+                        .disabled(authViewModel.isLoading)
+                        
+                    } else {
+                        // Show authentication options
+                        Text("Please confirm your identity:")
+                            .font(.headline)
+                            .padding(.bottom, 8)
+                        
+                        // Biometric authentication option (if available)
+                        if authViewModel.canUseBiometrics() {
+                            Button(action: {
+                                Task {
+                                    await authViewModel.deleteAccountWithBiometrics()
+                                    if authViewModel.errorMessage == nil {
+                                        isPresented = false
+                                    }
+                                }
+                            }) {
+                                HStack {
+                                    if authViewModel.isLoading {
+                                        ProgressView()
+                                            .scaleEffect(0.8)
+                                            .foregroundColor(.white)
+                                    } else {
+                                        Image(systemName: "faceid")
+                                    }
+                                    Text("Use Face ID / Touch ID")
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding()
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .cornerRadius(12)
+                                .fontWeight(.semibold)
+                            }
+                            .disabled(authViewModel.isLoading)
+                            
+                            Text("or")
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, 8)
+                        }
+                        
+                        // Password Input
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Enter your password:")
+                                .font(.subheadline)
+                                .foregroundColor(.primary)
+                            
+                            HStack {
+                                Group {
+                                    if showPassword {
+                                        TextField("Password", text: $password)
+                                    } else {
+                                        SecureField("Password", text: $password)
+                                    }
+                                }
+                                .padding()
+                                .background(Color(.systemGray6))
+                                .cornerRadius(10)
+                                
+                                Button(action: { showPassword.toggle() }) {
+                                    Image(systemName: showPassword ? "eye.slash" : "eye")
+                                        .foregroundColor(.gray)
+                                }
+                            }
+                        }
+                        .padding(.horizontal)
+                        
+                        // Password Delete Button
+                        Button(action: {
+                            Task {
+                                await authViewModel.reauthenticateAndDeleteAccount(password: password)
+                                if authViewModel.errorMessage == nil {
+                                    isPresented = false
+                                }
+                            }
+                        }) {
+                            HStack {
+                                if authViewModel.isLoading {
+                                    ProgressView()
+                                        .scaleEffect(0.8)
+                                        .foregroundColor(.white)
+                                } else {
+                                    Image(systemName: "trash.fill")
+                                }
+                                Text("Delete with Password")
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color.red)
+                            .foregroundColor(.white)
+                            .cornerRadius(12)
+                            .fontWeight(.semibold)
+                        }
+                        .disabled(password.isEmpty || authViewModel.isLoading)
+                    }
+                    
+                    // Cancel Button
+                    Button("Cancel") {
+                        password = ""
+                        authViewModel.errorMessage = nil
+                        isPresented = false
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color(.systemGray5))
+                    .foregroundColor(.primary)
+                    .cornerRadius(12)
+                    .fontWeight(.semibold)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 20)
+            }
+            .navigationTitle("")
+            .navigationBarHidden(true)
+        }
+        .onDisappear {
+            password = ""
+            authViewModel.errorMessage = nil
+        }
+    }
 } 

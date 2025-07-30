@@ -24,6 +24,7 @@ struct ProfileView: View {
     @State private var newCondition = ""
     
     @State private var showingDeleteAccountConfirmation = false
+    @State private var deleteAccountPassword = ""
 
     private let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
     private let bloodTypeOptions = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"]
@@ -72,16 +73,72 @@ struct ProfileView: View {
                     // Profile Tab
                     ScrollView {
                         VStack(spacing: 20) {
-                            personalInfoSection
-                            addressSection
-                            insuranceSection
-                            
                             if let errorMessage = viewModel.errorMessage {
-                                Text(errorMessage)
-                                    .foregroundColor(.red)
-                                    .padding()
-                                    .background(Color.red.opacity(0.1))
-                                    .cornerRadius(8)
+                                if viewModel.showingProfileRecovery {
+                                    // Profile Recovery Interface
+                                    VStack(spacing: 20) {
+                                        VStack(spacing: 12) {
+                                            Image(systemName: "person.crop.circle.badge.plus")
+                                                .font(.system(size: 50))
+                                                .foregroundColor(.blue)
+                                            
+                                            Text("Complete Your Profile")
+                                                .font(.title2)
+                                                .fontWeight(.bold)
+                                            
+                                            Text(errorMessage)
+                                                .font(.body)
+                                                .foregroundColor(.secondary)
+                                                .multilineTextAlignment(.center)
+                                        }
+                                        .padding()
+                                        .background(Color.blue.opacity(0.1))
+                                        .cornerRadius(12)
+                                        
+                                        // Show the profile form for completion
+                                        VStack(spacing: 20) {
+                                            personalInfoSection
+                                            addressSection
+                                            insuranceSection
+                                        }
+                                        
+                                        Button(action: {
+                                            Task {
+                                                await viewModel.createMissingProfile()
+                                            }
+                                        }) {
+                                            HStack {
+                                                if viewModel.isLoading {
+                                                    ProgressView()
+                                                        .scaleEffect(0.8)
+                                                        .foregroundColor(.white)
+                                                } else {
+                                                    Image(systemName: "checkmark.circle.fill")
+                                                }
+                                                Text("Save Profile")
+                                            }
+                                            .frame(maxWidth: .infinity)
+                                            .padding()
+                                            .background(Color.blue)
+                                            .foregroundColor(.white)
+                                            .cornerRadius(12)
+                                            .fontWeight(.semibold)
+                                        }
+                                        .disabled(viewModel.isLoading)
+                                    }
+                                } else {
+                                    // Regular error display
+                                    Text(errorMessage)
+                                        .foregroundColor(.red)
+                                        .padding()
+                                        .background(Color.red.opacity(0.1))
+                                        .cornerRadius(8)
+                                }
+                            } else if !viewModel.showingProfileRecovery {
+                                // Normal profile content when no errors and not in recovery mode
+                                personalInfoSection
+                                addressSection
+                                insuranceSection
                             }
                         }
                         .padding()
@@ -418,24 +475,32 @@ struct ProfileView: View {
                 }
                 Button(action: { showingDeleteAccountConfirmation = true }) {
                     HStack {
-                        Image(systemName: "trash.fill")
+                        if authViewModel.isLoading {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .foregroundColor(.white)
+                        } else {
+                            Image(systemName: "trash.fill")
+                        }
                         Text("Delete Account")
                     }.frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.8)).foregroundColor(.white).cornerRadius(12)
                 }
                 .disabled(authViewModel.isLoading)
+                
             }
         }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
-        .alert("Delete Account", isPresented: $showingDeleteAccountConfirmation) {
-            Button("Cancel", role: .cancel) { }
-            Button("Delete", role: .destructive) {
-                Task {
-                    await authViewModel.deleteAccount()
-                }
-            }
-        } message: {
-            Text("Are you sure you want to delete your account? This action cannot be undone and will permanently delete all your data including visits, medications, and health information.")
+        .sheet(isPresented: $showingDeleteAccountConfirmation) {
+            DeleteAccountConfirmationView(
+                password: $deleteAccountPassword,
+                authViewModel: authViewModel,
+                isPresented: $showingDeleteAccountConfirmation
+            )
         }
+        .onAppear {
+            // Clear any previous error messages when profile view appears
+            authViewModel.errorMessage = nil
         }
+    }
     
     // MARK: - Helper Functions
     private func tabTitle(for index: Int) -> String {

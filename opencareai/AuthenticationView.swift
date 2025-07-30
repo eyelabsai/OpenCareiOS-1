@@ -28,6 +28,8 @@ struct AuthenticationView: View {
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
+    @State private var showingForgotPassword = false
+    @State private var forgotPasswordEmail = ""
     
     // Options (matching web app)
     private let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
@@ -152,6 +154,27 @@ struct AuthenticationView: View {
                     .textFieldStyle(EnhancedTextFieldStyle())
                     .focused($focusedField, equals: .password)
                     .textContentType(.password)
+                
+                // Forgot Password Button
+                HStack {
+                    Spacer()
+                    Button("Forgot Password?") {
+                        forgotPasswordEmail = email
+                        showingForgotPassword = true
+                    }
+                    .font(.caption)
+                    .foregroundColor(.blue)
+                }
+            }
+            
+            // Password reset success message
+            if viewModel.passwordResetSent {
+                Text("Password reset email sent! Check your inbox.")
+                    .foregroundColor(.green)
+                    .font(.caption)
+                    .padding()
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(8)
             }
             
             // Error message
@@ -205,6 +228,17 @@ struct AuthenticationView: View {
             }
         }
         .padding(.horizontal, 30)
+        .alert("Reset Password", isPresented: $showingForgotPassword) {
+            TextField("Email", text: $forgotPasswordEmail)
+            Button("Send Reset Link") {
+                Task {
+                    await viewModel.sendPasswordReset(email: forgotPasswordEmail)
+                }
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Enter your email address to receive a password reset link.")
+        }
     }
     
     private var registrationForm: some View {

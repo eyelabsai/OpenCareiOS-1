@@ -37,6 +37,7 @@ class UserViewModel: ObservableObject {
     )
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
+    @Published var showingProfileRecovery: Bool = false
     
     private let firebaseService = OpenCareFirebaseService.shared
     
@@ -45,11 +46,101 @@ class UserViewModel: ObservableObject {
         errorMessage = nil
         
         do {
-            let userId = Auth.auth().currentUser?.uid ?? ""
-            let fetchedUser = try await firebaseService.getUserData(userId: userId)
+            guard let currentUser = Auth.auth().currentUser else {
+                throw FirebaseError.userNotFound
+            }
+            
+            let fetchedUser = try await firebaseService.getUserData(userId: currentUser.uid)
             self.user = fetchedUser
+            showingProfileRecovery = false
+            
         } catch {
-            errorMessage = "Failed to fetch profile: \(error.localizedDescription)"
+            print("Profile fetch error: \(error.localizedDescription)")
+            
+            // Check if it's a missing profile error
+            if error.localizedDescription.contains("User not found") {
+                await handleMissingProfile()
+            } else {
+                errorMessage = "Failed to fetch profile: \(error.localizedDescription)"
+            }
+        }
+        
+        isLoading = false
+    }
+    
+    private func handleMissingProfile() async {
+        guard let currentUser = Auth.auth().currentUser else {
+            errorMessage = "Authentication error - please sign in again"
+            return
+        }
+        
+        print("Profile not found, attempting to create basic profile...")
+        
+        // Try to create a basic profile from auth data
+        do {
+            let basicUser = User(
+                id: currentUser.uid,
+                email: currentUser.email ?? "",
+                firstName: currentUser.displayName?.components(separatedBy: " ").first ?? "",
+                lastName: currentUser.displayName?.components(separatedBy: " ").dropFirst().joined(separator: " ") ?? "",
+                dob: "",
+                gender: "",
+                phoneNumber: currentUser.phoneNumber ?? "",
+                street: "",
+                city: "",
+                state: "",
+                zip: "",
+                insuranceProvider: "",
+                insuranceMemberId: "",
+                allergies: [],
+                chronicConditions: [],
+                heightFeet: "",
+                heightInches: "",
+                weight: "",
+                emergencyContactName: "",
+                emergencyContactPhone: "",
+                primaryPhysician: "",
+                bloodType: "",
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+            
+            // Save the basic profile
+            try await firebaseService.updateUser(basicUser)
+            self.user = basicUser
+            errorMessage = "Profile recovered! Please complete your information below."
+            showingProfileRecovery = true
+            
+        } catch {
+            print("Failed to create basic profile: \(error.localizedDescription)")
+            errorMessage = "Profile not found. Please complete your profile information."
+            showingProfileRecovery = true
+        }
+    }
+    
+    func createMissingProfile() async {
+        guard let currentUser = Auth.auth().currentUser else {
+            errorMessage = "Authentication error - please sign in again"
+            return
+        }
+        
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            var newUser = user
+            newUser.id = currentUser.uid
+            newUser.email = currentUser.email ?? user.email
+            newUser.createdAt = Date()
+            newUser.updatedAt = Date()
+            
+            try await firebaseService.updateUser(newUser)
+            self.user = newUser
+            showingProfileRecovery = false
+            errorMessage = nil
+            
+        } catch {
+            errorMessage = "Failed to create profile: \(error.localizedDescription)"
         }
         
         isLoading = false

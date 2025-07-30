@@ -36,56 +36,75 @@ class OpenCareFirebaseService: ObservableObject {
     
     // MARK: - Account Management
     func deleteAccount(userId: String) async throws {
+        print("Starting account deletion for user: \(userId)")
+        
         // First, delete all user-related data from Firestore
         let batch = db.batch()
         
-        // Delete user's visits
-        let visitsSnapshot = try await db.collection("visits")
-            .whereField("userId", isEqualTo: userId)
-            .getDocuments()
-        
-        for document in visitsSnapshot.documents {
-            batch.deleteDocument(document.reference)
+        do {
+            // Delete user's visits
+            print("Deleting user visits...")
+            let visitsSnapshot = try await db.collection("visits")
+                .whereField("userId", isEqualTo: userId)
+                .getDocuments()
+            
+            for document in visitsSnapshot.documents {
+                batch.deleteDocument(document.reference)
+            }
+            print("Found \(visitsSnapshot.documents.count) visits to delete")
+            
+            // Delete user's medications
+            print("Deleting user medications...")
+            let medicationsSnapshot = try await db.collection("medications")
+                .whereField("userId", isEqualTo: userId)
+                .getDocuments()
+            
+            for document in medicationsSnapshot.documents {
+                batch.deleteDocument(document.reference)
+            }
+            print("Found \(medicationsSnapshot.documents.count) medications to delete")
+            
+            // Delete user profile
+            print("Deleting user profile...")
+            batch.deleteDocument(db.collection("users").document(userId))
+            
+            // Commit the batch
+            print("Committing batch deletion...")
+            try await batch.commit()
+            print("Firestore data deletion completed")
+            
+        } catch {
+            print("Error during Firestore deletion: \(error.localizedDescription)")
+            // Don't throw here - we still want to try to delete the auth account
         }
-        
-        // Delete user's medications
-        let medicationsSnapshot = try await db.collection("medications")
-            .whereField("userId", isEqualTo: userId)
-            .getDocuments()
-        
-        for document in medicationsSnapshot.documents {
-            batch.deleteDocument(document.reference)
-        }
-        
-        // Delete user's visit-medication actions
-        let actionsSnapshot = try await db.collection("visit_medications")
-            .whereField("medicationId", in: medicationsSnapshot.documents.map { $0.documentID })
-            .getDocuments()
-        
-        for document in actionsSnapshot.documents {
-            batch.deleteDocument(document.reference)
-        }
-        
-        // Delete user profile
-        batch.deleteDocument(db.collection("users").document(userId))
-        
-        // Commit the batch
-        try await batch.commit()
         
         // Finally, delete the Firebase Auth account
+        print("Deleting Firebase Auth account...")
         guard let currentUser = auth.currentUser else {
             throw FirebaseError.userNotFound
         }
         
         try await currentUser.delete()
+        print("Firebase Auth account deleted successfully")
     }
     
     // MARK: - User Management
     func getUserData(userId: String) async throws -> User {
+        print("Fetching user data for userId: \(userId)")
+        
         let document = try await db.collection("users").document(userId).getDocument()
-        guard let data = document.data() else {
+        
+        guard document.exists else {
+            print("User document does not exist for userId: \(userId)")
             throw FirebaseError.userNotFound
         }
+        
+        guard let data = document.data() else {
+            print("User document exists but has no data for userId: \(userId)")
+            throw FirebaseError.invalidData
+        }
+        
+        print("Successfully fetched user data for userId: \(userId)")
         
         // Convert Firestore data to User object safely
         var user = User()
@@ -121,6 +140,16 @@ class OpenCareFirebaseService: ObservableObject {
         }
         
         return user
+    }
+    
+    func userProfileExists(userId: String) async -> Bool {
+        do {
+            let document = try await db.collection("users").document(userId).getDocument()
+            return document.exists && document.data() != nil
+        } catch {
+            print("Error checking if user profile exists: \(error.localizedDescription)")
+            return false
+        }
     }
     
     private func saveUser(_ user: User) async throws {
