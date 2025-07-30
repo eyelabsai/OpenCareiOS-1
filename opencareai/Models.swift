@@ -95,6 +95,23 @@ struct Visit: Codable, Identifiable {
     var chronicConditions: [String]?
     var createdAt: Date?
     var updatedAt: Date?
+    // Enhanced fields matching web app
+    var setting: VisitSetting?
+    var isDischarge: Bool?
+    var startedAt: Date?
+}
+
+// MARK: - Visit Setting (matching web app)
+enum VisitSetting: String, Codable, CaseIterable {
+    case clinic = "clinic"
+    case hospital = "hospital"
+    
+    var displayName: String {
+        switch self {
+        case .clinic: return "Clinic/Outpatient"
+        case .hospital: return "Hospital/Inpatient"
+        }
+    }
 }
 
 // MARK: - Medication Model (matching web app structure)
@@ -115,6 +132,39 @@ struct Medication: Codable, Identifiable {
     var createdAt: Date?
     var updatedAt: Date?
     var discontinuedDate: Date?
+    // Enhanced fields matching web app
+    var context: MedicationContext?
+    var lifecycle: MedicationLifecycle?
+    var startDate: Date?
+}
+
+// MARK: - Medication Context & Lifecycle (matching web app)
+enum MedicationContext: String, Codable, CaseIterable {
+    case hospital = "hospital"
+    case clinic = "clinic" 
+    case discharge = "discharge"
+    
+    var displayName: String {
+        switch self {
+        case .hospital: return "Hospital"
+        case .clinic: return "Clinic/Outpatient"
+        case .discharge: return "Discharge/Home"
+        }
+    }
+}
+
+enum MedicationLifecycle: String, Codable, CaseIterable {
+    case acute = "acute"
+    case chronic = "chronic"
+    case transitional = "transitional"
+    
+    var displayName: String {
+        switch self {
+        case .acute: return "Short-term"
+        case .chronic: return "Long-term"
+        case .transitional: return "Transitional"
+        }
+    }
 }
 
 // MARK: - Enhanced User Model
@@ -258,6 +308,9 @@ struct SummarizationResponseAPI: Codable {
     let medicationActions: [MedicationAction]?
     let chronicConditions: [String]?
     let error: String?
+    // Enhanced fields matching web app
+    let setting: String?
+    let isDischarge: Bool?
 }
 
 struct VisitSummary: Codable {
@@ -268,12 +321,27 @@ struct VisitSummary: Codable {
     var medications: [Medication]
     var medicationActions: [String] // Changed from [MedicationAction] to [String] to match API response
     var chronicConditions: [String]
+    // Enhanced fields matching web app
+    var setting: String?
+    var isDischarge: Bool?
 }
 
 struct HealthAssistantResponse: Codable {
     let success: Bool
     let answer: String?
     let error: String?
+}
+
+// MARK: - Enhanced Health Assistant (matching web app)
+struct HealthAssistantRequest: Codable {
+    let userId: String
+    let query: String
+    let conversationHistory: [ConversationMessage]?
+}
+
+struct ConversationMessage: Codable {
+    let role: String // "user" or "assistant"
+    let content: String
 }
 
 // MARK: - App State (matching web app functionality)
@@ -405,6 +473,7 @@ enum APIError: Error, LocalizedError {
     case summarizationFailed(String)
     case assistantFailed(String)
     case networkError(Error)
+    case authenticationRequired
     
     var errorDescription: String? {
         switch self {
@@ -422,6 +491,8 @@ enum APIError: Error, LocalizedError {
             return "Health assistant failed: \(message)"
         case .networkError(let error):
             return "Network error: \(error.localizedDescription)"
+        case .authenticationRequired:
+            return "Authentication required. Please log in to continue."
         }
     }
 }

@@ -18,10 +18,13 @@ struct ProfileView: View {
     @EnvironmentObject var medicationViewModel: MedicationViewModel
     
     @State private var reportURL: URL?
+    @State private var selectedTab = 0
     
     @State private var showingAddCondition = false
     @State private var newCondition = ""
     
+    @State private var showingDeleteAccountConfirmation = false
+
     private let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
     private let bloodTypeOptions = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"]
     private let insuranceOptions = ["", "Aetna", "Blue Cross", "Cigna", "UnitedHealthcare", "Kaiser", "None", "Other"]
@@ -29,29 +32,85 @@ struct ProfileView: View {
     
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 24) {
-                    profileHeader
-                    personalInfoSection
-                    addressSection
-                    insuranceSection
-                    emergencySection
-                    healthSection
-                    healthKitSection
-                    appearanceSection
-                    reminderSettingsSection
-                    chronicConditionsSection
-                    accountActionsSection
-                    
-                    if let errorMessage = viewModel.errorMessage {
-                        Text(errorMessage)
-                            .foregroundColor(.red)
-                            .padding()
-                            .background(Color.red.opacity(0.1))
-                            .cornerRadius(8)
+            VStack(spacing: 0) {
+                // Profile Header
+                profileHeader
+                    .padding(.horizontal)
+                    .padding(.top)
+                
+                // Custom Tab Picker
+                HStack(spacing: 0) {
+                    ForEach(0..<3) { index in
+                        Button(action: { selectedTab = index }) {
+                            Text(tabTitle(for: index))
+                                .font(.system(size: 15, weight: selectedTab == index ? .semibold : .medium))
+                                .foregroundColor(selectedTab == index ? .white : .primary)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 10)
+                                .background(
+                                    selectedTab == index ? 
+                                        Color.blue : 
+                                        Color.clear
+                                )
+                                .cornerRadius(8)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        if index < 2 {
+                            Spacer()
+                        }
                     }
                 }
-                .padding()
+                .padding(.horizontal, 24)
+                .padding(.vertical, 8)
+                .background(Color(.systemGray6))
+                .cornerRadius(10)
+                .padding(.horizontal)
+                
+                // Tab Content
+                TabView(selection: $selectedTab) {
+                    // Profile Tab
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            personalInfoSection
+                            addressSection
+                            insuranceSection
+                            
+                            if let errorMessage = viewModel.errorMessage {
+                                Text(errorMessage)
+                                    .foregroundColor(.red)
+                                    .padding()
+                                    .background(Color.red.opacity(0.1))
+                                    .cornerRadius(8)
+                            }
+                        }
+                        .padding()
+                    }
+                    .tag(0)
+                    
+                    // Health Tab
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            healthSection
+                            healthKitSection
+                            chronicConditionsSection
+                        }
+                        .padding()
+                    }
+                    .tag(1)
+                    
+                    // Settings Tab
+                    ScrollView {
+                        VStack(spacing: 20) {
+                            appearanceSection
+                            reminderSettingsSection
+                            accountActionsSection
+                        }
+                        .padding()
+                    }
+                    .tag(2)
+                }
+                .tabViewStyle(PageTabViewStyle(indexDisplayMode: .never))
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.large)
@@ -65,31 +124,42 @@ struct ProfileView: View {
                     showingAddCondition = false
                 })
             }
-            // --- This is the correct placement for the sheet modifier ---
         }
     }
     
     // MARK: - Subviews
     private var profileHeader: some View {
-        VStack(spacing: 16) {
+        HStack(spacing: 16) {
             Circle()
                 .fill(LinearGradient(colors: [.blue, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
-                .frame(width: 100, height: 100)
+                .frame(width: 60, height: 60)
                 .overlay(
                     Text((viewModel.user.firstName.prefix(1) + viewModel.user.lastName.prefix(1)).uppercased())
-                        .font(.largeTitle).fontWeight(.bold).foregroundColor(.white)
+                        .font(.title2).fontWeight(.bold).foregroundColor(.white)
                 )
-            VStack(spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(viewModel.user.fullName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "User" : viewModel.user.fullName)
-                    .font(.title2).fontWeight(.semibold)
-                Text(viewModel.user.email).font(.subheadline).foregroundColor(.secondary)
+                    .font(.title3).fontWeight(.semibold)
+                Text(viewModel.user.email).font(.caption).foregroundColor(.secondary)
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+            Spacer()
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(radius: 1)
     }
 
     private var personalInfoSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Personal Information").font(.headline).fontWeight(.semibold)
+            HStack {
+                Image(systemName: "person.circle.fill")
+                    .foregroundColor(.blue)
+                    .font(.title2)
+                Text("Personal Information")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
             VStack(spacing: 12) {
                 HStack {
                     Image(systemName: "person.fill").foregroundColor(.blue).frame(width: 20)
@@ -114,12 +184,19 @@ struct ProfileView: View {
                     TextField("Phone Number", text: $viewModel.user.phoneNumber).textFieldStyle(RoundedBorderTextFieldStyle()).keyboardType(.phonePad)
                 }
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+        }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
     }
 
     private var addressSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Address").font(.headline).fontWeight(.semibold)
+            HStack {
+                Image(systemName: "house.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.title2)
+                Text("Address")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
             VStack(spacing: 12) {
                 TextField("Street Address", text: $viewModel.user.street).textFieldStyle(RoundedBorderTextFieldStyle())
                 HStack {
@@ -130,34 +207,40 @@ struct ProfileView: View {
                     TextField("ZIP", text: $viewModel.user.zip).textFieldStyle(RoundedBorderTextFieldStyle()).keyboardType(.numbersAndPunctuation)
                 }
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+        }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
     }
     
     private var insuranceSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Insurance").font(.headline).fontWeight(.semibold)
+            HStack {
+                Image(systemName: "creditcard.circle.fill")
+                    .foregroundColor(.orange)
+                    .font(.title2)
+                Text("Insurance")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
             VStack(spacing: 12) {
                 Picker("Insurance Provider", selection: $viewModel.user.insuranceProvider) {
                     ForEach(insuranceOptions, id: \.self) { Text($0) }
                 }.pickerStyle(MenuPickerStyle())
                 TextField("Insurance Member ID", text: $viewModel.user.insuranceMemberId).textFieldStyle(RoundedBorderTextFieldStyle())
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+        }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
     }
     
-    private var emergencySection: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Emergency Contact").font(.headline).fontWeight(.semibold)
-            VStack(spacing: 12) {
-                TextField("Contact Name", text: $viewModel.user.emergencyContactName).textFieldStyle(RoundedBorderTextFieldStyle())
-                TextField("Contact Phone", text: $viewModel.user.emergencyContactPhone).textFieldStyle(RoundedBorderTextFieldStyle()).keyboardType(.phonePad)
-            }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
-    }
+
 
     private var healthSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Health").font(.headline).fontWeight(.semibold)
+            HStack {
+                Image(systemName: "heart.circle.fill")
+                    .foregroundColor(.pink)
+                    .font(.title2)
+                Text("Health Information")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
             VStack(spacing: 12) {
                 TextField("Primary Physician", text: $viewModel.user.primaryPhysician).textFieldStyle(RoundedBorderTextFieldStyle())
                 TextField("Known Allergies", text: Binding(
@@ -185,14 +268,19 @@ struct ProfileView: View {
                     ForEach(bloodTypeOptions, id: \.self) { Text($0) }
                 }.pickerStyle(MenuPickerStyle())
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+        }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
     }
     
     private var healthKitSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Apple Health")
-                .font(.headline)
-                .fontWeight(.semibold)
+            HStack {
+                Image(systemName: "heart.text.square.circle.fill")
+                    .foregroundColor(.red)
+                    .font(.title2)
+                Text("Apple Health")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
 
             Button(action: syncWithHealthKit) {
                 HStack {
@@ -200,18 +288,28 @@ struct ProfileView: View {
                         .foregroundColor(.red)
                     Text("Sync with Health App")
                     Spacer()
+                    Image(systemName: "arrow.right.circle")
+                        .foregroundColor(.blue)
                 }
             }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(radius: 2)
+        .cornerRadius(12)
+        .shadow(radius: 1)
     }
 
     private var appearanceSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Appearance").font(.headline).fontWeight(.semibold)
+            HStack {
+                Image(systemName: "paintbrush.circle.fill")
+                    .foregroundColor(.purple)
+                    .font(.title2)
+                Text("Appearance")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
             VStack(spacing: 12) {
                 Picker("Theme", selection: $appState.colorScheme) {
                     ForEach(ColorSchemeOption.allCases, id: \.self) { scheme in
@@ -220,34 +318,47 @@ struct ProfileView: View {
                 }.pickerStyle(MenuPickerStyle())
                 Text("Choose your preferred app appearance").font(.subheadline).foregroundColor(.secondary)
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+        }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
     }
     
     private var reminderSettingsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Notification Settings")
-                .font(.headline)
-                .fontWeight(.semibold)
+            HStack {
+                Image(systemName: "bell.circle.fill")
+                    .foregroundColor(.orange)
+                    .font(.title2)
+                Text("Notification Settings")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+            }
             
             NavigationLink(destination: MedicationTimeSettingsView()) {
                 HStack {
+                    Image(systemName: "clock.fill")
+                        .foregroundColor(.blue)
                     Text("Medication Reminder Times")
                     Spacer()
                     Image(systemName: "chevron.right")
                         .foregroundColor(.secondary)
                 }
             }
+            .buttonStyle(PlainButtonStyle())
         }
         .padding()
         .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(radius: 2)
+        .cornerRadius(12)
+        .shadow(radius: 1)
     }
 
     private var chronicConditionsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Text("Chronic Conditions").font(.headline).fontWeight(.semibold)
+                Image(systemName: "heart.text.square.circle.fill")
+                    .foregroundColor(.pink)
+                    .font(.title2)
+                Text("Chronic Conditions")
+                    .font(.headline)
+                    .fontWeight(.semibold)
                 Spacer()
                 Button(action: { showingAddCondition = true }) {
                     Image(systemName: "plus.circle.fill").foregroundColor(.blue).font(.title2)
@@ -272,32 +383,70 @@ struct ProfileView: View {
                     }
                 }
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+        }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
     }
 
     private var accountActionsSection: some View {
-        VStack(spacing: 12) {
-            Button(action: generateAndExportReport) {
-                HStack {
-                    Image(systemName: "square.and.arrow.down.fill")
-                    Text("Export Health Report")
-                }.frame(maxWidth: .infinity).padding().background(Color.green).foregroundColor(.white).cornerRadius(12)
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Image(systemName: "gear.circle.fill")
+                    .foregroundColor(.gray)
+                    .font(.title2)
+                Text("Account Actions")
+                    .font(.headline)
+                    .fontWeight(.semibold)
             }
-            Button(action: { Task { await viewModel.updateUserProfile() } }) {
-                HStack {
-                    Image(systemName: "checkmark.circle.fill")
-                    Text("Save Changes")
-                }.frame(maxWidth: .infinity).padding().background(Color.blue).foregroundColor(.white).cornerRadius(12)
-            }.disabled(viewModel.isLoading)
-            Button(action: { authViewModel.signOut() }) {
-                HStack {
-                    Image(systemName: "rectangle.portrait.and.arrow.right")
-                    Text("Sign Out")
-                }.frame(maxWidth: .infinity).padding().background(Color.red).foregroundColor(.white).cornerRadius(12)
+            
+            VStack(spacing: 12) {
+                Button(action: generateAndExportReport) {
+                    HStack {
+                        Image(systemName: "square.and.arrow.down.fill")
+                        Text("Export Health Report")
+                    }.frame(maxWidth: .infinity).padding().background(Color.green).foregroundColor(.white).cornerRadius(12)
+                }
+                Button(action: { Task { await viewModel.updateUserProfile() } }) {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                        Text("Save Changes")
+                    }.frame(maxWidth: .infinity).padding().background(Color.blue).foregroundColor(.white).cornerRadius(12)
+                }.disabled(viewModel.isLoading)
+                Button(action: { authViewModel.signOut() }) {
+                    HStack {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                        Text("Sign Out")
+                    }.frame(maxWidth: .infinity).padding().background(Color.red).foregroundColor(.white).cornerRadius(12)
+                }
+                Button(action: { showingDeleteAccountConfirmation = true }) {
+                    HStack {
+                        Image(systemName: "trash.fill")
+                        Text("Delete Account")
+                    }.frame(maxWidth: .infinity).padding().background(Color.red.opacity(0.8)).foregroundColor(.white).cornerRadius(12)
+                }
+                .disabled(authViewModel.isLoading)
             }
-        }.padding().background(Color(.systemBackground)).cornerRadius(16).shadow(radius: 2)
+        }.padding().background(Color(.systemBackground)).cornerRadius(12).shadow(radius: 1)
+        .alert("Delete Account", isPresented: $showingDeleteAccountConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                Task {
+                    await authViewModel.deleteAccount()
+                }
+            }
+        } message: {
+            Text("Are you sure you want to delete your account? This action cannot be undone and will permanently delete all your data including visits, medications, and health information.")
+        }
+        }
+    
+    // MARK: - Helper Functions
+    private func tabTitle(for index: Int) -> String {
+        switch index {
+        case 0: return "Profile"
+        case 1: return "Health"
+        case 2: return "Settings"
+        default: return ""
+        }
     }
-
+    
     // MARK: - Functions
     
     private func syncWithHealthKit() {

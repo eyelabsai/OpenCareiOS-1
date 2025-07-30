@@ -80,11 +80,15 @@ class HealthAssistantViewModel: ObservableObject {
         messages.append(userMessage)
         
         do {
-            // Get context from recent visits and medications
-            let context = await buildContext()
+            // Build conversation history from recent messages (last 6 for context)
+            let conversationHistory = buildConversationHistory()
             
-            // Send to API
-            let response = try await apiService.askHealthAssistant(question: message, context: context)
+            // Send to enhanced API with conversation history
+            let response = try await apiService.askHealthAssistant(
+                userId: userId,
+                query: message,
+                conversationHistory: conversationHistory
+            )
             
             guard let answer = response.answer else {
                 throw APIError.assistantFailed("No response received")
@@ -113,7 +117,32 @@ class HealthAssistantViewModel: ObservableObject {
         currentMessage = ""
     }
     
-    // MARK: - Build Context
+    // MARK: - Build Conversation History (matching web app)
+    private func buildConversationHistory() -> [ConversationMessage] {
+        // Get last 6 messages for context (excluding the current one being processed)
+        let recentMessages = Array(messages.suffix(6))
+        var conversationHistory: [ConversationMessage] = []
+        
+        for message in recentMessages {
+            // Add user message
+            conversationHistory.append(ConversationMessage(
+                role: "user",
+                content: message.message
+            ))
+            
+            // Add assistant response if available
+            if !message.response.isEmpty {
+                conversationHistory.append(ConversationMessage(
+                    role: "assistant", 
+                    content: message.response
+                ))
+            }
+        }
+        
+        return conversationHistory
+    }
+    
+    // MARK: - Build Context (legacy - kept for reference)
     private func buildContext() async -> String {
         guard let userId = Auth.auth().currentUser?.uid else {
             return ""

@@ -8,6 +8,7 @@
 
 
 import Foundation
+import FirebaseAuth
 
 @MainActor
 class VisitPrepViewModel: ObservableObject {
@@ -56,16 +57,26 @@ class VisitPrepViewModel: ObservableObject {
         Focus on medication changes, new or recurring symptoms, and follow-up actions.
         """
 
-        // 3. Call the API
+        // 3. Call the API with enhanced parameters
         do {
-            let response = try await apiService.askHealthAssistant(question: question, context: context)
+            // Get current user ID from Firebase Auth
+            guard let currentUser = Auth.auth().currentUser else {
+                throw APIError.authenticationRequired
+            }
+            let userId = currentUser.uid
+            
+            let response = try await apiService.askHealthAssistant(
+                userId: userId,
+                query: question,
+                conversationHistory: [] // No conversation history needed for visit prep
+            )
             guard let answer = response.answer else {
                 throw APIError.assistantFailed("No response received from AI.")
             }
             
             // 4. Parse the bulleted list response
-            self.prepPoints = answer.components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "- ", with: "") }
+            self.prepPoints = answer.components(separatedBy: CharacterSet.newlines)
+                .map { $0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).replacingOccurrences(of: "- ", with: "") }
                 .filter { !$0.isEmpty }
 
         } catch {

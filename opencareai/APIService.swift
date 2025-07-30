@@ -156,6 +156,15 @@ class APIService: ObservableObject {
                 print("🔊 Visit date detected: \(date)")
             }
             
+            // Log enhanced fields matching web app
+            if let setting = summarizationResponse.setting {
+                print("🔊 Visit setting detected: \(setting)")
+            }
+            
+            if let isDischarge = summarizationResponse.isDischarge {
+                print("🔊 Discharge status detected: \(isDischarge)")
+            }
+            
             return summarizationResponse
         } catch {
             if let apiError = error as? APIError {
@@ -339,14 +348,16 @@ class APIService: ObservableObject {
             date: summarizationResponse.date ?? "TODAY",
             medications: summarizationResponse.medications ?? [],
             medicationActions: actions.map { $0.action.rawValue },
-            chronicConditions: summarizationResponse.chronicConditions ?? []
+            chronicConditions: summarizationResponse.chronicConditions ?? [],
+            setting: summarizationResponse.setting ?? "clinic",
+            isDischarge: summarizationResponse.isDischarge ?? false
         )
         return (visitSummary, finalMedications, actions)
     }
     
-    // MARK: - Health Assistant API
-    func askHealthAssistant(question: String, context: String? = nil) async throws -> HealthAssistantResponse {
-        guard let url = URL(string: "\(baseURL)/assistant") else {
+    // MARK: - Enhanced Health Assistant API (matching web app)
+    func askHealthAssistant(userId: String, query: String, conversationHistory: [ConversationMessage] = []) async throws -> HealthAssistantResponse {
+        guard let url = URL(string: "\(baseURL)/health-assistant") else {
             throw APIError.invalidURL
         }
         
@@ -354,12 +365,13 @@ class APIService: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        var requestBody: [String: Any] = ["question": question]
-        if let context = context {
-            requestBody["context"] = context
-        }
+        let requestBody = HealthAssistantRequest(
+            userId: userId,
+            query: query,
+            conversationHistory: conversationHistory.isEmpty ? nil : conversationHistory
+        )
         
-        request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+        request.httpBody = try JSONEncoder().encode(requestBody)
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -437,7 +449,9 @@ class APIService: ObservableObject {
             date: summarizationResponse.date ?? "TODAY",
             medications: medications,
             medicationActions: medicationActionStrings,
-            chronicConditions: summarizationResponse.chronicConditions ?? []
+            chronicConditions: summarizationResponse.chronicConditions ?? [],
+            setting: summarizationResponse.setting ?? "clinic",
+            isDischarge: summarizationResponse.isDischarge ?? false
         )
         
         return visitSummary

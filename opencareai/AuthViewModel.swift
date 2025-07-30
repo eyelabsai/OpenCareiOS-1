@@ -97,4 +97,23 @@ class AuthViewModel: ObservableObject {
             self.errorMessage = "Failed to sign out: \(error.localizedDescription)"
         }
     }
+    
+    func deleteAccount() async {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            guard let userId = userSession?.uid else {
+                throw FirebaseError.userNotFound
+            }
+            
+            try await OpenCareFirebaseService.shared.deleteAccount(userId: userId)
+            errorMessage = nil
+            // userSession will automatically be set to nil due to auth state listener
+        } catch {
+            errorMessage = "Failed to delete account: \(error.localizedDescription)"
+        }
+        
+        isLoading = false
+    }
 }

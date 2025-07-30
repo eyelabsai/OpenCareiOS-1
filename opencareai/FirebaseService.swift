@@ -34,6 +34,52 @@ class OpenCareFirebaseService: ObservableObject {
         try auth.signOut()
     }
     
+    // MARK: - Account Management
+    func deleteAccount(userId: String) async throws {
+        // First, delete all user-related data from Firestore
+        let batch = db.batch()
+        
+        // Delete user's visits
+        let visitsSnapshot = try await db.collection("visits")
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+        
+        for document in visitsSnapshot.documents {
+            batch.deleteDocument(document.reference)
+        }
+        
+        // Delete user's medications
+        let medicationsSnapshot = try await db.collection("medications")
+            .whereField("userId", isEqualTo: userId)
+            .getDocuments()
+        
+        for document in medicationsSnapshot.documents {
+            batch.deleteDocument(document.reference)
+        }
+        
+        // Delete user's visit-medication actions
+        let actionsSnapshot = try await db.collection("visit_medications")
+            .whereField("medicationId", in: medicationsSnapshot.documents.map { $0.documentID })
+            .getDocuments()
+        
+        for document in actionsSnapshot.documents {
+            batch.deleteDocument(document.reference)
+        }
+        
+        // Delete user profile
+        batch.deleteDocument(db.collection("users").document(userId))
+        
+        // Commit the batch
+        try await batch.commit()
+        
+        // Finally, delete the Firebase Auth account
+        guard let currentUser = auth.currentUser else {
+            throw FirebaseError.userNotFound
+        }
+        
+        try await currentUser.delete()
+    }
+    
     // MARK: - User Management
     func getUserData(userId: String) async throws -> User {
         let document = try await db.collection("users").document(userId).getDocument()
@@ -156,7 +202,10 @@ class OpenCareFirebaseService: ObservableObject {
                 "instructions": med.instructions as Any,
                 "fullInstructions": med.fullInstructions as Any,
                 "isActive": med.isActive as Any,
-                "discontinuationReason": med.discontinuationReason as Any
+                "discontinuationReason": med.discontinuationReason as Any,
+                // Enhanced fields matching web app
+                "context": med.context?.rawValue as Any,
+                "lifecycle": med.lifecycle?.rawValue as Any
             ]
             if let createdAt = med.createdAt {
                 dict["createdAt"] = createdAt
@@ -167,10 +216,13 @@ class OpenCareFirebaseService: ObservableObject {
             if let discontinuedDate = med.discontinuedDate {
                 dict["discontinuedDate"] = discontinuedDate
             }
+            if let startDate = med.startDate {
+                dict["startDate"] = startDate
+            }
             return dict
         }
         // Prepare the visit dictionary
-        let visitDict: [String: Any] = [
+        var visitDict: [String: Any] = [
             "id": newVisit.id as Any,
             "userId": userId,
             "specialty": newVisit.specialty,
@@ -182,6 +234,17 @@ class OpenCareFirebaseService: ObservableObject {
             "createdAt": newVisit.createdAt ?? Date(),
             "updatedAt": newVisit.updatedAt ?? Date()
         ]
+        
+        // Add enhanced fields matching web app
+        if let setting = newVisit.setting {
+            visitDict["setting"] = setting.rawValue
+        }
+        if let isDischarge = newVisit.isDischarge {
+            visitDict["isDischarge"] = isDischarge
+        }
+        if let startedAt = newVisit.startedAt {
+            visitDict["startedAt"] = startedAt
+        }
         // Save to Firestore
         _ = try await db.collection("visits").addDocument(data: visitDict)
     }
@@ -203,7 +266,7 @@ class OpenCareFirebaseService: ObservableObject {
             // Fix: Decode medications from array of dictionaries
             if let medicationsData = data["medications"] as? [[String: Any]] {
                 let medications = medicationsData.compactMap { medData -> Medication? in
-                    Medication(
+                    var medication = Medication(
                         id: medData["id"] as? String,
                         userId: medData["userId"] as? String,
                         name: medData["name"] as? String ?? "",
@@ -221,6 +284,19 @@ class OpenCareFirebaseService: ObservableObject {
                         updatedAt: (medData["updatedAt"] as? Timestamp)?.dateValue(),
                         discontinuedDate: (medData["discontinuedDate"] as? Timestamp)?.dateValue()
                     )
+                    
+                    // Enhanced fields matching web app
+                    if let contextString = medData["context"] as? String {
+                        medication.context = MedicationContext(rawValue: contextString)
+                    }
+                    if let lifecycleString = medData["lifecycle"] as? String {
+                        medication.lifecycle = MedicationLifecycle(rawValue: lifecycleString)
+                    }
+                    if let startDate = medData["startDate"] as? Timestamp {
+                        medication.startDate = startDate.dateValue()
+                    }
+                    
+                    return medication
                 }
                 visit.medications = medications
             } else {
@@ -268,6 +344,15 @@ class OpenCareFirebaseService: ObservableObject {
             }
             if let updatedAtTimestamp = data["updatedAt"] as? Timestamp {
                 visit.updatedAt = updatedAtTimestamp.dateValue()
+            }
+            
+            // Enhanced fields matching web app
+            if let settingString = data["setting"] as? String {
+                visit.setting = VisitSetting(rawValue: settingString)
+            }
+            visit.isDischarge = data["isDischarge"] as? Bool
+            if let startedAtTimestamp = data["startedAt"] as? Timestamp {
+                visit.startedAt = startedAtTimestamp.dateValue()
             }
             
             return visit
@@ -353,6 +438,15 @@ class OpenCareFirebaseService: ObservableObject {
             visit.updatedAt = updatedAtTimestamp.dateValue()
         }
         
+        // Enhanced fields matching web app
+        if let settingString = data["setting"] as? String {
+            visit.setting = VisitSetting(rawValue: settingString)
+        }
+        visit.isDischarge = data["isDischarge"] as? Bool
+        if let startedAtTimestamp = data["startedAt"] as? Timestamp {
+            visit.startedAt = startedAtTimestamp.dateValue()
+        }
+        
         return visit
     }
     
@@ -374,7 +468,7 @@ class OpenCareFirebaseService: ObservableObject {
         newMedication.createdAt = Date()
         newMedication.updatedAt = Date()
         
-        let dict: [String: Any] = [
+        var dict: [String: Any] = [
             "id": newMedication.id ?? "",
             "userId": userId,
             "name": newMedication.name.lowercased(),
@@ -390,6 +484,17 @@ class OpenCareFirebaseService: ObservableObject {
             "createdAt": Timestamp(date: Date()),
             "updatedAt": Timestamp(date: Date())
         ]
+        
+        // Enhanced fields matching web app
+        if let context = newMedication.context {
+            dict["context"] = context.rawValue
+        }
+        if let lifecycle = newMedication.lifecycle {
+            dict["lifecycle"] = lifecycle.rawValue
+        }
+        if let startDate = newMedication.startDate {
+            dict["startDate"] = Timestamp(date: startDate)
+        }
         
         try await db.collection("medications").addDocument(data: dict)
     }
