@@ -53,6 +53,18 @@ struct MedicationView: View {
                             .cornerRadius(16)
                         }
                         Spacer()
+                        Button(action: syncMedicationsWithHealthKit) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "heart.fill")
+                                    .foregroundColor(.red)
+                                Text("Sync Health")
+                            }
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.red.opacity(0.1))
+                            .cornerRadius(8)
+                        }
                         Text("\(displayedMedications.count) medications")
                             .font(.caption).foregroundColor(.secondary)
                     }
@@ -118,6 +130,34 @@ struct MedicationView: View {
             .sheet(isPresented: $showingDetailSheet) {
                 if let med = selectedMedication {
                     MedicationDetailView(medication: med, scheduler: scheduler)
+                }
+            }
+        }
+    }
+    
+    private func syncMedicationsWithHealthKit() {
+        HealthKitManager.shared.requestAuthorization { success in
+            guard success else { 
+                print("HealthKit authorization denied")
+                return 
+            }
+            
+            HealthKitManager.shared.performTwoWayMedicationSync(appMedications: medicationViewModel.medications) { syncResult in
+                print("🔄 Two-Way Medication Sync Complete:")
+                print(syncResult.summary)
+                
+                // Log details for debugging
+                if !syncResult.matchedMedications.isEmpty {
+                    print("✅ Matched medications with HealthKit data")
+                }
+                
+                if !syncResult.unmatchedHealthKitRecords.isEmpty {
+                    print("🆕 Found new medications in HealthKit that could be added to your app")
+                }
+                
+                if !syncResult.medicationsToWriteToHealthKit.isEmpty {
+                    let status = syncResult.healthKitWriteSuccess ? "✅" : "❌"
+                    print("\(status) Wrote your app medications to HealthKit")
                 }
             }
         }

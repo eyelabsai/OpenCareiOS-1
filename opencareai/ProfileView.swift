@@ -339,17 +339,31 @@ struct ProfileView: View {
                     .fontWeight(.semibold)
             }
 
-            Button(action: syncWithHealthKit) {
-                HStack {
-                    Image(systemName: "heart.fill")
-                        .foregroundColor(.red)
-                    Text("Sync with Health App")
-                    Spacer()
-                    Image(systemName: "arrow.right.circle")
-                        .foregroundColor(.blue)
+            VStack(spacing: 12) {
+                Button(action: syncWithHealthKit) {
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                        Text("Sync Basic Health Data")
+                        Spacer()
+                        Image(systemName: "arrow.right.circle")
+                            .foregroundColor(.blue)
+                    }
                 }
+                .buttonStyle(PlainButtonStyle())
+                
+                Button(action: syncMedicationsWithHealthKit) {
+                    HStack {
+                        Image(systemName: "pills.fill")
+                            .foregroundColor(.orange)
+                        Text("Sync Medications")
+                        Spacer()
+                        Image(systemName: "arrow.right.circle")
+                            .foregroundColor(.blue)
+                    }
+                }
+                .buttonStyle(PlainButtonStyle())
             }
-            .buttonStyle(PlainButtonStyle())
         }
         .padding()
         .background(Color(.systemBackground))
@@ -535,6 +549,59 @@ struct ProfileView: View {
                 }
             }
             
+        }
+    }
+    
+    private func syncMedicationsWithHealthKit() {
+        HealthKitManager.shared.requestAuthorization { success in
+            guard success else { 
+                print("HealthKit authorization denied")
+                return 
+            }
+            
+            // Get current medications from the app
+            let currentMedications = self.medicationViewModel.medications
+            
+            HealthKitManager.shared.performTwoWayMedicationSync(appMedications: currentMedications) { syncResult in
+                print("🔄 Medication Sync Complete:")
+                print(syncResult.summary)
+                
+                // Show matched medications
+                print("\n✅ Matched Medications:")
+                for match in syncResult.matchedMedications {
+                    let matchTypeStr = match.matchType == .nameAndDosage ? "exact" : "name only"
+                    print("- \(match.appMedication.name) (\(matchTypeStr) match) - \(match.healthKitRecords.count) HealthKit records")
+                }
+                
+                // Show new medications found in HealthKit
+                if !syncResult.unmatchedHealthKitRecords.isEmpty {
+                    print("\n🆕 New Medications from HealthKit:")
+                    let groupedRecords = Dictionary(grouping: syncResult.unmatchedHealthKitRecords) { $0.name }
+                    for (name, records) in groupedRecords {
+                        print("- \(name): \(records.count) doses recorded")
+                    }
+                }
+                
+                // Show medications written to HealthKit
+                if !syncResult.medicationsToWriteToHealthKit.isEmpty {
+                    let status = syncResult.healthKitWriteSuccess ? "✅ Success" : "❌ Failed"
+                    print("\n📤 Written to HealthKit (\(status)):")
+                    for medication in syncResult.medicationsToWriteToHealthKit {
+                        print("- \(medication.name) (\(medication.dosage))")
+                    }
+                    
+                    if syncResult.healthKitWriteSuccess {
+                        print("\n🔍 To see your medications in Health app:")
+                        print("   1. Open Health app")
+                        print("   2. Tap 'Browse' tab")
+                        print("   3. Scroll to 'Other Data'")
+                        print("   4. Tap 'Handwashing'")
+                        print("   5. Your medications will appear as handwashing events with medication names in the details")
+                    }
+                }
+                
+                // Future: Could show UI dialog for user to review and approve new medications
+            }
         }
     }
     

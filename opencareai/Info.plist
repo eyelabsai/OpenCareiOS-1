@@ -9,5 +9,9 @@
 	</dict>
 	<key>ServerURL</key>
 	<string>https://opencare-gpt.vercel.app</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>This app needs access to your health data to provide personalized health insights and track your wellness progress.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>This app may write health data to help you track and manage your health information.</string>
 </dict>
 </plist>
