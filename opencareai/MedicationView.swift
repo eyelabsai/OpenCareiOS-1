@@ -15,8 +15,22 @@ struct MedicationView: View {
     
     @State private var searchText          = ""
     @State private var showingActiveOnly   = true
-    @State private var selectedMedication: Medication?
-    @State private var showingDetailSheet  = false
+    
+    enum SheetType: Identifiable {
+        case medicationDetail(Medication)
+        case healthKitExplanation
+        
+        var id: String {
+            switch self {
+            case .medicationDetail(let medication):
+                return "detail_\(medication.id ?? "unknown")"
+            case .healthKitExplanation:
+                return "healthkit"
+            }
+        }
+    }
+    
+    @State private var activeSheet: SheetType?
     
     private var displayedMedications: [Medication] {
         let filtered = medicationViewModel.filteredMedications
@@ -53,6 +67,24 @@ struct MedicationView: View {
                             .cornerRadius(16)
                         }
                         Spacer()
+                        Button(action: { 
+                            if UserDefaults.standard.bool(forKey: "hasShownHealthKitMedicationExplanation") {
+                                syncMedicationsWithHealthKit()
+                            } else {
+                                activeSheet = .healthKitExplanation
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "heart.fill")
+                                    .foregroundColor(.red)
+                                Text("Sync with Apple Health")
+                            }
+                            .font(.caption)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.red.opacity(0.1))
+                            .cornerRadius(8)
+                        }
                         Text("\(displayedMedications.count) medications")
                             .font(.caption).foregroundColor(.secondary)
                     }
@@ -77,8 +109,7 @@ struct MedicationView: View {
                         MedicationRowView(medication: med, scheduler: scheduler)
                             .onTapGesture {
                                 print("[DEBUG] Medication tapped: \(med)") // Debug print
-                                selectedMedication = med
-                                showingDetailSheet = true
+                                activeSheet = .medicationDetail(med)
                             }
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 if med.isActive ?? true {
@@ -115,9 +146,50 @@ struct MedicationView: View {
             .refreshable { 
                 await medicationViewModel.loadMedicationsAsync()
             }
-            .sheet(isPresented: $showingDetailSheet) {
-                if let med = selectedMedication {
-                    MedicationDetailView(medication: med, scheduler: scheduler)
+            .sheet(item: $activeSheet) { sheetType in
+                switch sheetType {
+                case .medicationDetail(let medication):
+                    MedicationDetailView(medication: medication, scheduler: scheduler)
+                case .healthKitExplanation:
+                    HealthKitExplanationView(
+                        syncType: .medications,
+                        onProceed: {
+                            activeSheet = nil
+                            UserDefaults.standard.set(true, forKey: "hasShownHealthKitMedicationExplanation")
+                            syncMedicationsWithHealthKit()
+                        },
+                        onCancel: {
+                            activeSheet = nil
+                        }
+                    )
+                }
+            }
+        }
+    }
+    
+    private func syncMedicationsWithHealthKit() {
+        HealthKitManager.shared.requestAuthorization { success in
+            guard success else { 
+                print("HealthKit authorization denied")
+                return 
+            }
+            
+            HealthKitManager.shared.performTwoWayMedicationSync(appMedications: medicationViewModel.medications) { syncResult in
+                print("🔄 Two-Way Medication Sync Complete:")
+                print(syncResult.summary)
+                
+                // Log details for debugging
+                if !syncResult.matchedMedications.isEmpty {
+                    print("✅ Matched medications with HealthKit data")
+                }
+                
+                if !syncResult.unmatchedHealthKitRecords.isEmpty {
+                    print("🆕 Found new medications in HealthKit that could be added to your app")
+                }
+                
+                if !syncResult.medicationsToWriteToHealthKit.isEmpty {
+                    let status = syncResult.healthKitWriteSuccess ? "✅" : "❌"
+                    print("\(status) Wrote your app medications to HealthKit")
                 }
             }
         }

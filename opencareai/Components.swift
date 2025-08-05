@@ -222,6 +222,21 @@ struct MedicationItem: View {
                         .background(Color.green.opacity(0.1))
                         .foregroundColor(.green)
                         .cornerRadius(8)
+                    
+                    HStack(spacing: 2) {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.caption2)
+                        Text("HealthKit")
+                            .font(.caption2)
+                            .foregroundColor(.red)
+                    }
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(6)
+                    
+                    Spacer()
                 }
             }
             

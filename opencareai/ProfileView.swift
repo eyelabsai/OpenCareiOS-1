@@ -25,6 +25,8 @@ struct ProfileView: View {
     
     @State private var showingDeleteAccountConfirmation = false
     @State private var deleteAccountPassword = ""
+    @State private var showingHealthKitExplanation = false
+    @State private var healthKitSyncType: HealthKitSyncType = .basicData
 
     private let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
     private let bloodTypeOptions = ["", "A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"]
@@ -174,6 +176,25 @@ struct ProfileView: View {
             .onAppear {
                 Task { await viewModel.fetchUserProfile() }
             }
+            .sheet(isPresented: $showingHealthKitExplanation) {
+                HealthKitExplanationView(
+                    syncType: healthKitSyncType,
+                    onProceed: {
+                        showingHealthKitExplanation = false
+                        switch healthKitSyncType {
+                        case .basicData:
+                            UserDefaults.standard.set(true, forKey: "hasShownHealthKitBasicExplanation")
+                            syncWithHealthKit()
+                        case .medications:
+                            UserDefaults.standard.set(true, forKey: "hasShownHealthKitMedicationExplanation")
+                            syncMedicationsWithHealthKit()
+                        }
+                    },
+                    onCancel: {
+                        showingHealthKitExplanation = false
+                    }
+                )
+            }
             .sheet(isPresented: $showingAddCondition) {
                 AddConditionSheet(newCondition: $newCondition, onAdd: {
                     Task { await viewModel.addCondition(newCondition) }
@@ -223,18 +244,54 @@ struct ProfileView: View {
                     TextField("First Name", text: $viewModel.user.firstName).textFieldStyle(RoundedBorderTextFieldStyle())
                     TextField("Last Name", text: $viewModel.user.lastName).textFieldStyle(RoundedBorderTextFieldStyle())
                 }
-                HStack {
-                    Image(systemName: "calendar").foregroundColor(.blue).frame(width: 20)
-                    DatePicker("Date of Birth", selection: Binding(
-                        get: { dateFromString(viewModel.user.dob) ?? Date() },
-                        set: { viewModel.user.dob = stringFromDate($0) }
-                    ), displayedComponents: .date).labelsHidden()
+                
+                if !viewModel.user.firstName.isEmpty || !viewModel.user.lastName.isEmpty {
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.caption2)
+                        Text("Name can be synced from Apple Health")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
                 }
-                HStack {
-                    Image(systemName: "person.2.fill").foregroundColor(.blue).frame(width: 20)
-                    Picker("Gender", selection: $viewModel.user.gender) {
-                        ForEach(genderOptions, id: \.self) { Text($0) }
-                    }.pickerStyle(MenuPickerStyle())
+                VStack(spacing: 4) {
+                    HStack {
+                        Image(systemName: "calendar").foregroundColor(.blue).frame(width: 20)
+                        DatePicker("Date of Birth", selection: Binding(
+                            get: { dateFromString(viewModel.user.dob) ?? Date() },
+                            set: { viewModel.user.dob = stringFromDate($0) }
+                        ), displayedComponents: .date).labelsHidden()
+                    }
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.caption2)
+                        Text("Date of birth from Apple Health")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+                VStack(spacing: 4) {
+                    HStack {
+                        Image(systemName: "person.2.fill").foregroundColor(.blue).frame(width: 20)
+                        Picker("Gender", selection: $viewModel.user.gender) {
+                            ForEach(genderOptions, id: \.self) { Text($0) }
+                        }.pickerStyle(MenuPickerStyle())
+                    }
+                    if !viewModel.user.gender.isEmpty {
+                        HStack {
+                            Image(systemName: "heart.fill")
+                                .foregroundColor(.red)
+                                .font(.caption2)
+                            Text("Biological sex from Apple Health")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                    }
                 }
                 HStack {
                     Image(systemName: "phone.fill").foregroundColor(.blue).frame(width: 20)
@@ -306,20 +363,46 @@ struct ProfileView: View {
                         viewModel.user.allergies = newValue.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                     }
                 )).textFieldStyle(RoundedBorderTextFieldStyle())
-                HStack {
-                    Text("Height:")
-                    Picker("Feet", selection: $viewModel.user.heightFeet) {
-                        ForEach((4...7).map { String($0) }, id: \.self) { Text("\($0) ft") }
-                    }.pickerStyle(MenuPickerStyle())
-                    Picker("Inches", selection: $viewModel.user.heightInches) {
-                        ForEach((0...11).map { String($0) }, id: \.self) { Text("\($0) in") }
-                    }.pickerStyle(MenuPickerStyle())
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Height:")
+                        Picker("Feet", selection: $viewModel.user.heightFeet) {
+                            ForEach((4...7).map { String($0) }, id: \.self) { Text("\($0) ft") }
+                        }.pickerStyle(MenuPickerStyle())
+                        Picker("Inches", selection: $viewModel.user.heightInches) {
+                            ForEach((0...11).map { String($0) }, id: \.self) { Text("\($0) in") }
+                        }.pickerStyle(MenuPickerStyle())
+                    }
+                    if !viewModel.user.heightFeet.isEmpty && !viewModel.user.heightInches.isEmpty {
+                        HStack {
+                            Image(systemName: "heart.fill")
+                                .foregroundColor(.red)
+                                .font(.caption2)
+                            Text("Height synced from Apple Health")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                    }
                 }
-                HStack {
-                    Text("Weight:")
-                    Picker("Weight", selection: $viewModel.user.weight) {
-                        ForEach((80...400).map { String($0) }, id: \.self) { Text("\($0) lbs") }
-                    }.pickerStyle(MenuPickerStyle())
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Weight:")
+                        Picker("Weight", selection: $viewModel.user.weight) {
+                            ForEach((80...400).map { String($0) }, id: \.self) { Text("\($0) lbs") }
+                        }.pickerStyle(MenuPickerStyle())
+                    }
+                    if !viewModel.user.weight.isEmpty {
+                        HStack {
+                            Image(systemName: "heart.fill")
+                                .foregroundColor(.red)
+                                .font(.caption2)
+                            Text("Weight synced from Apple Health")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                    }
                 }
                 Picker("Blood Type", selection: $viewModel.user.bloodType) {
                     ForEach(bloodTypeOptions, id: \.self) { Text($0) }
@@ -334,22 +417,113 @@ struct ProfileView: View {
                 Image(systemName: "heart.text.square.circle.fill")
                     .foregroundColor(.red)
                     .font(.title2)
-                Text("Apple Health")
+                Text("Apple Health Integration")
                     .font(.headline)
                     .fontWeight(.semibold)
             }
-
-            Button(action: syncWithHealthKit) {
-                HStack {
-                    Image(systemName: "heart.fill")
-                        .foregroundColor(.red)
-                    Text("Sync with Health App")
-                    Spacer()
-                    Image(systemName: "arrow.right.circle")
-                        .foregroundColor(.blue)
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("This app uses HealthKit to:")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.primary)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Read your height, weight, and basic health data")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Sync medication information with Health app")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                            .font(.caption)
+                        Text("Access your date of birth and biological sex")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
+                .padding(.bottom, 8)
             }
-            .buttonStyle(PlainButtonStyle())
+
+            VStack(spacing: 12) {
+                Button(action: { 
+                    if UserDefaults.standard.bool(forKey: "hasShownHealthKitBasicExplanation") {
+                        syncWithHealthKit()
+                    } else {
+                        healthKitSyncType = .basicData
+                        showingHealthKitExplanation = true
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("Sync Basic Health Data")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Image(systemName: "applelogo")
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                            }
+                            Text("Imports height, weight, and characteristics from HealthKit")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.right.circle")
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                Button(action: { 
+                    if UserDefaults.standard.bool(forKey: "hasShownHealthKitMedicationExplanation") {
+                        syncMedicationsWithHealthKit()
+                    } else {
+                        healthKitSyncType = .medications
+                        showingHealthKitExplanation = true
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "pills.fill")
+                            .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack {
+                                Text("Sync Medications")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Image(systemName: "applelogo")
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                            }
+                            Text("Two-way sync with Health app medication records")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "arrow.right.circle")
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.vertical, 8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
         .padding()
         .background(Color(.systemBackground))
@@ -538,6 +712,59 @@ struct ProfileView: View {
         }
     }
     
+    private func syncMedicationsWithHealthKit() {
+        HealthKitManager.shared.requestAuthorization { success in
+            guard success else { 
+                print("HealthKit authorization denied")
+                return 
+            }
+            
+            // Get current medications from the app
+            let currentMedications = self.medicationViewModel.medications
+            
+            HealthKitManager.shared.performTwoWayMedicationSync(appMedications: currentMedications) { syncResult in
+                print("🔄 Medication Sync Complete:")
+                print(syncResult.summary)
+                
+                // Show matched medications
+                print("\n✅ Matched Medications:")
+                for match in syncResult.matchedMedications {
+                    let matchTypeStr = match.matchType == .nameAndDosage ? "exact" : "name only"
+                    print("- \(match.appMedication.name) (\(matchTypeStr) match) - \(match.healthKitRecords.count) HealthKit records")
+                }
+                
+                // Show new medications found in HealthKit
+                if !syncResult.unmatchedHealthKitRecords.isEmpty {
+                    print("\n🆕 New Medications from HealthKit:")
+                    let groupedRecords = Dictionary(grouping: syncResult.unmatchedHealthKitRecords) { $0.name }
+                    for (name, records) in groupedRecords {
+                        print("- \(name): \(records.count) doses recorded")
+                    }
+                }
+                
+                // Show medications written to HealthKit
+                if !syncResult.medicationsToWriteToHealthKit.isEmpty {
+                    let status = syncResult.healthKitWriteSuccess ? "✅ Success" : "❌ Failed"
+                    print("\n📤 Written to HealthKit (\(status)):")
+                    for medication in syncResult.medicationsToWriteToHealthKit {
+                        print("- \(medication.name) (\(medication.dosage))")
+                    }
+                    
+                    if syncResult.healthKitWriteSuccess {
+                        print("\n🔍 To see your medications in Health app:")
+                        print("   1. Open Health app")
+                        print("   2. Tap 'Browse' tab")
+                        print("   3. Scroll to 'Other Data'")
+                        print("   4. Tap 'Handwashing'")
+                        print("   5. Your medications will appear as handwashing events with medication names in the details")
+                    }
+                }
+                
+                // Future: Could show UI dialog for user to review and approve new medications
+            }
+        }
+    }
+    
     private func generateAndExportReport() {
             // 1. Create the report view
             let reportView = HealthReportView(
@@ -580,6 +807,12 @@ struct ProfileView: View {
     }
 } // --- THIS IS THE CORRECT CLOSING BRACE FOR THE ProfileView STRUCT ---
 
+// MARK: - Helper Enums
+enum HealthKitSyncType {
+    case basicData
+    case medications
+}
+
 // MARK: - Helper Structs
 struct AddConditionSheet: View {
     @Binding var newCondition: String
@@ -599,6 +832,145 @@ struct AddConditionSheet: View {
                     Button("Add") { onAdd() }.buttonStyle(.borderedProminent).disabled(newCondition.isEmpty)
                 }
             }.padding()
+        }
+    }
+}
+
+// MARK: - HealthKit Explanation View
+struct HealthKitExplanationView: View {
+    let syncType: HealthKitSyncType
+    let onProceed: () -> Void
+    let onCancel: () -> Void
+    
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 24) {
+                // Header
+                VStack(spacing: 16) {
+                    Image(systemName: "heart.text.square.fill")
+                        .font(.system(size: 60))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [Color.red, Color.pink],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    
+                    Text("Apple Health Integration")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                }
+                .padding(.top, 20)
+                
+                // Content based on sync type
+                VStack(alignment: .leading, spacing: 16) {
+                    if syncType == .basicData {
+                        Text("This will sync your basic health data:")
+                            .font(.headline)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Height and weight measurements")
+                            }
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Date of birth and biological sex")
+                            }
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Most recent values from Health app")
+                            }
+                        }
+                        .font(.subheadline)
+                        
+                    } else {
+                        Text("This will sync your medications:")
+                            .font(.headline)
+                        
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Import medication records from Health app")
+                            }
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Export your app medications to Health app")
+                            }
+                            HStack {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                                Text("Two-way synchronization")
+                            }
+                        }
+                        .font(.subheadline)
+                    }
+                    
+                    // Access instructions
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("To view synced data in Apple Health:")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("1. Open the Health app")
+                            Text("2. Tap 'Browse' at the bottom")
+                            if syncType == .basicData {
+                                Text("3. Find 'Body Measurements' for height/weight")
+                                Text("4. Or go to 'Health Details' for personal info")
+                            } else {
+                                Text("3. Scroll to 'Other Data'")
+                                Text("4. Look for 'Mindfulness' (medications stored here)")
+                                Text("5. Check metadata for medication details")
+                            }
+                        }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.leading, 8)
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                }
+                
+                Spacer()
+                
+                // Buttons
+                VStack(spacing: 12) {
+                    Button(action: onProceed) {
+                        HStack {
+                            Image(systemName: "heart.fill")
+                                .foregroundColor(.white)
+                            Text("Continue with Sync")
+                                .fontWeight(.semibold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                        .background(Color.red)
+                        .foregroundColor(.white)
+                        .cornerRadius(12)
+                    }
+                    
+                    Button(action: onCancel) {
+                        Text("Not Now")
+                            .frame(maxWidth: .infinity)
+                            .padding()
+                            .background(Color(.systemGray5))
+                            .foregroundColor(.primary)
+                            .cornerRadius(12)
+                    }
+                }
+                .padding(.bottom, 20)
+            }
+            .padding(.horizontal, 24)
+            .navigationTitle("")
+            .navigationBarHidden(true)
         }
     }
 }

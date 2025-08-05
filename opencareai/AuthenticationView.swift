@@ -30,6 +30,7 @@ struct AuthenticationView: View {
     @State private var confirmPassword = ""
     @State private var showingForgotPassword = false
     @State private var forgotPasswordEmail = ""
+    @State private var showingHealthKitExplanation = false
     
     // Options (matching web app)
     private let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
@@ -239,6 +240,19 @@ struct AuthenticationView: View {
         } message: {
             Text("Enter your email address to receive a password reset link.")
         }
+        .sheet(isPresented: $showingHealthKitExplanation) {
+            HealthKitExplanationView(
+                syncType: .basicData,
+                onProceed: {
+                    showingHealthKitExplanation = false
+                    UserDefaults.standard.set(true, forKey: "hasShownHealthKitRegistrationExplanation")
+                    syncWithHealthKitForRegistration()
+                },
+                onCancel: {
+                    showingHealthKitExplanation = false
+                }
+            )
+        }
     }
     
     private var registrationForm: some View {
@@ -342,14 +356,46 @@ struct AuthenticationView: View {
             Text("Basic Information")
                 .font(.headline)
                 .fontWeight(.semibold)
-            Spacer()
-            Button(action: syncWithHealthKitForRegistration) {
-                            HStack {
-                                Image(systemName: "heart.fill")
-                                Text("Sync with Health")
-                            }
-                            .font(.caption)
-                        }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Image(systemName: "heart.text.square.fill")
+                        .foregroundColor(.red)
+                        .font(.title2)
+                    Text("Apple Health Integration")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                }
+                
+                Text("This app uses HealthKit to automatically fill your health information including height, weight, date of birth, and biological sex.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.leading)
+                
+                Button(action: { 
+                    if UserDefaults.standard.bool(forKey: "hasShownHealthKitRegistrationExplanation") {
+                        syncWithHealthKitForRegistration()
+                    } else {
+                        showingHealthKitExplanation = true
+                    }
+                }) {
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                        Text("Import from Apple Health")
+                        Spacer()
+                        Image(systemName: "arrow.right.circle")
+                            .foregroundColor(.blue)
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(Color.red.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+            .padding()
+            .background(Color(.systemGray6))
+            .cornerRadius(12)
             
             VStack(spacing: 12) {
                 HStack {
@@ -364,15 +410,39 @@ struct AuthenticationView: View {
                         .textContentType(.familyName)
                 }
                 
-                DatePicker("Date of Birth", selection: $dob, displayedComponents: .date)
-                    .datePickerStyle(CompactDatePickerStyle())
-                
-                Picker("Gender", selection: $gender) {
-                    ForEach(genderOptions, id: \.self) { option in
-                        Text(option.isEmpty ? "Select Gender" : option).tag(option)
+                VStack(spacing: 4) {
+                    DatePicker("Date of Birth", selection: $dob, displayedComponents: .date)
+                        .datePickerStyle(CompactDatePickerStyle())
+                    
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.caption2)
+                        Text("Can be imported from Apple Health")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
                     }
                 }
-                .pickerStyle(MenuPickerStyle())
+                
+                VStack(spacing: 4) {
+                    Picker("Gender", selection: $gender) {
+                        ForEach(genderOptions, id: \.self) { option in
+                            Text(option.isEmpty ? "Select Gender" : option).tag(option)
+                        }
+                    }
+                    .pickerStyle(MenuPickerStyle())
+                    
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.caption2)
+                        Text("Biological sex from Apple Health")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
                 
                 TextField("Phone Number", text: $phoneNumber)
                     .textFieldStyle(RoundedBorderTextFieldStyle())
@@ -465,31 +535,55 @@ struct AuthenticationView: View {
                 .fontWeight(.semibold)
             
             VStack(spacing: 12) {
-                HStack {
-                    Text("Height:")
-                    Picker("Feet", selection: $heightFeet) {
-                        ForEach((4...7).map { String($0) }, id: \.self) { ft in
-                            Text("\(ft) ft").tag(ft)
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Height:")
+                        Picker("Feet", selection: $heightFeet) {
+                            ForEach((4...7).map { String($0) }, id: \.self) { ft in
+                                Text("\(ft) ft").tag(ft)
+                            }
                         }
+                        .pickerStyle(MenuPickerStyle())
+                        
+                        Picker("Inches", selection: $heightInches) {
+                            ForEach((0...11).map { String($0) }, id: \.self) { inch in
+                                Text("\(inch) in").tag(inch)
+                            }
+                        }
+                        .pickerStyle(MenuPickerStyle())
                     }
-                    .pickerStyle(MenuPickerStyle())
                     
-                    Picker("Inches", selection: $heightInches) {
-                        ForEach((0...11).map { String($0) }, id: \.self) { inch in
-                            Text("\(inch) in").tag(inch)
-                        }
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.caption2)
+                        Text("Height data from Apple Health")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
                     }
-                    .pickerStyle(MenuPickerStyle())
                 }
                 
-                HStack {
-                    Text("Weight:")
-                    Picker("Weight", selection: $weight) {
-                        ForEach((80...400).map { String($0) }, id: \.self) { lbs in
-                            Text("\(lbs) lbs").tag(lbs)
+                VStack(spacing: 4) {
+                    HStack {
+                        Text("Weight:")
+                        Picker("Weight", selection: $weight) {
+                            ForEach((80...400).map { String($0) }, id: \.self) { lbs in
+                                Text("\(lbs) lbs").tag(lbs)
+                            }
                         }
+                        .pickerStyle(MenuPickerStyle())
                     }
-                    .pickerStyle(MenuPickerStyle())
+                    
+                    HStack {
+                        Image(systemName: "heart.fill")
+                            .foregroundColor(.red)
+                            .font(.caption2)
+                        Text("Weight data from Apple Health")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
                 }
             }
         }
