@@ -31,7 +31,32 @@ class AuthViewModel: ObservableObject {
         isLoading = false
     }
 
+    // Simplified user creation for basic registration
     func createUser(
+        withEmail email: String,
+        password: String,
+        firstName: String,
+        lastName: String
+    ) async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            let newUser = User(
+                email: email,
+                firstName: firstName,
+                lastName: lastName
+            )
+            try await OpenCareFirebaseService.shared.signUp(email: email, password: password, userData: newUser)
+            isLoading = false
+        } catch {
+            isLoading = false
+            errorMessage = "Registration failed: \(error.localizedDescription)"
+            print("[Registration Error] \(error)")
+        }
+    }
+
+    // Full user creation with all details (for profile completion)
+    func createUserWithFullDetails(
         withEmail email: String,
         password: String,
         firstName: String,

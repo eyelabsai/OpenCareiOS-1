@@ -5,43 +5,23 @@ struct AuthenticationView: View {
     @StateObject private var viewModel = AuthViewModel()
     @State private var isSignUp = false
     @State private var currentStep = 1
-    @State private var totalSteps = 7
+    @State private var totalSteps = 2
     
-    // Registration fields (matching web app)
+    // Registration fields (simplified)
     @State private var firstName = ""
     @State private var lastName = ""
-    @State private var dob = Date()
-    @State private var gender = ""
-    @State private var phoneNumber = ""
-    @State private var street = ""
-    @State private var city = ""
-    @State private var state = ""
-    @State private var zip = ""
-    @State private var insuranceProvider = ""
-    @State private var insuranceMemberId = ""
-    @State private var allergies = ""
-    @State private var heightFeet = ""
-    @State private var heightInches = ""
-    @State private var weight = ""
-    @State private var selectedConditions = Set<String>()
-    @State private var otherConditions = ""
     @State private var email = ""
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var showingForgotPassword = false
     @State private var forgotPasswordEmail = ""
-    @State private var showingHealthKitExplanation = false
     
-    // Options (matching web app)
-    private let genderOptions = ["", "Male", "Female", "Other", "Prefer not to say"]
-    private let insuranceOptions = ["", "Aetna", "Blue Cross", "Cigna", "UnitedHealthcare", "Kaiser", "None", "Other"]
-    private let stateOptions = ["", "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"]
-    private let chronicConditions = ["Hypertension", "Diabetes", "Asthma", "Heart Disease", "Arthritis", "Depression", "Anxiety", "Obesity", "High Cholesterol", "Thyroid Disease", "Cancer", "Stroke", "Kidney Disease", "Liver Disease", "COPD", "Epilepsy", "Migraine", "Fibromyalgia", "Lupus", "Multiple Sclerosis"]
+
     
     @FocusState private var focusedField: Field?
     
     enum Field {
-        case firstName, lastName, phone, street, city, zip, insuranceMemberId, allergies, otherConditions, email, password, confirmPassword
+        case firstName, lastName, email, password, confirmPassword
     }
 
     var body: some View {
@@ -240,19 +220,7 @@ struct AuthenticationView: View {
         } message: {
             Text("Enter your email address to receive a password reset link.")
         }
-        .sheet(isPresented: $showingHealthKitExplanation) {
-            HealthKitExplanationView(
-                syncType: .basicData,
-                onProceed: {
-                    showingHealthKitExplanation = false
-                    UserDefaults.standard.set(true, forKey: "hasShownHealthKitRegistrationExplanation")
-                    syncWithHealthKitForRegistration()
-                },
-                onCancel: {
-                    showingHealthKitExplanation = false
-                }
-            )
-        }
+
     }
     
     private var registrationForm: some View {
@@ -260,18 +228,8 @@ struct AuthenticationView: View {
             Group {
                 switch currentStep {
                 case 1:
-                    basicInfoStep
+                    simplifiedBasicInfoStep
                 case 2:
-                    addressStep
-                case 3:
-                    insuranceStep
-                case 4:
-                    allergiesStep
-                case 5:
-                    physicalMeasurementsStep
-                case 6:
-                    chronicConditionsStep
-                case 7:
                     accountSetupStep
                 default:
                     EmptyView()
@@ -350,309 +308,104 @@ struct AuthenticationView: View {
         .padding(.horizontal, 30)
     }
     
-    // Step 1: Basic Information
-    private var basicInfoStep: some View {
+    // Step 1: Simplified Basic Information (First and Last Name only)
+    private var simplifiedBasicInfoStep: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Basic Information")
                 .font(.headline)
                 .fontWeight(.semibold)
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Image(systemName: "heart.text.square.fill")
-                        .foregroundColor(.red)
-                        .font(.title2)
-                    Text("Apple Health Integration")
+            
+            Text("Let's start with your basic information. You can complete your full profile later.")
                         .font(.subheadline)
-                        .fontWeight(.semibold)
-                }
-                
-                Text("This app uses HealthKit to automatically fill your health information including height, weight, date of birth, and biological sex.")
-                    .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.leading)
-                
-                Button(action: { 
-                    if UserDefaults.standard.bool(forKey: "hasShownHealthKitRegistrationExplanation") {
-                        syncWithHealthKitForRegistration()
-                    } else {
-                        showingHealthKitExplanation = true
-                    }
-                }) {
-                    HStack {
-                        Image(systemName: "heart.fill")
-                            .foregroundColor(.red)
-                        Text("Import from Apple Health")
-                        Spacer()
-                        Image(systemName: "arrow.right.circle")
-                            .foregroundColor(.blue)
-                    }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(Color.red.opacity(0.1))
-                    .cornerRadius(8)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-            .padding()
-            .background(Color(.systemGray6))
-            .cornerRadius(12)
             
             VStack(spacing: 12) {
                 HStack {
                     TextField("First Name", text: $firstName)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .textFieldStyle(EnhancedTextFieldStyle())
                         .focused($focusedField, equals: .firstName)
                         .textContentType(.givenName)
                     
                     TextField("Last Name", text: $lastName)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
+                        .textFieldStyle(EnhancedTextFieldStyle())
                         .focused($focusedField, equals: .lastName)
                         .textContentType(.familyName)
                 }
-                
-                VStack(spacing: 4) {
-                    DatePicker("Date of Birth", selection: $dob, displayedComponents: .date)
-                        .datePickerStyle(CompactDatePickerStyle())
-                    
-                    HStack {
-                        Image(systemName: "heart.fill")
-                            .foregroundColor(.red)
-                            .font(.caption2)
-                        Text("Can be imported from Apple Health")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                }
-                
-                VStack(spacing: 4) {
-                    Picker("Gender", selection: $gender) {
-                        ForEach(genderOptions, id: \.self) { option in
-                            Text(option.isEmpty ? "Select Gender" : option).tag(option)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                    
-                    HStack {
-                        Image(systemName: "heart.fill")
-                            .foregroundColor(.red)
-                            .font(.caption2)
-                        Text("Biological sex from Apple Health")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                }
-                
-                TextField("Phone Number", text: $phoneNumber)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .focused($focusedField, equals: .phone)
-                    .textContentType(.telephoneNumber)
-                    .keyboardType(.phonePad)
             }
         }
     }
     
-    // Step 2: Address Information
-    private var addressStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Address Information")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            VStack(spacing: 12) {
-                TextField("Street Address", text: $street)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .focused($focusedField, equals: .street)
-                    .textContentType(.streetAddressLine1)
-                
-                HStack {
-                    TextField("City", text: $city)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .city)
-                        .textContentType(.addressCity)
-                    
-                    Picker("State", selection: $state) {
-                        ForEach(stateOptions, id: \.self) { option in
-                            Text(option.isEmpty ? "State" : option).tag(option)
-                        }
-                    }
-                    .pickerStyle(MenuPickerStyle())
-                    
-                    TextField("ZIP", text: $zip)
-                        .textFieldStyle(RoundedBorderTextFieldStyle())
-                        .focused($focusedField, equals: .zip)
-                        .textContentType(.postalCode)
-                        .keyboardType(.numbersAndPunctuation)
-                }
-            }
-        }
-    }
+
     
-    // Step 3: Insurance Information
-    private var insuranceStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Insurance Information")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            VStack(spacing: 12) {
-                Picker("Insurance Provider", selection: $insuranceProvider) {
-                    ForEach(insuranceOptions, id: \.self) { option in
-                        Text(option.isEmpty ? "Select Provider" : option).tag(option)
-                    }
-                }
-                .pickerStyle(MenuPickerStyle())
-                
-                TextField("Insurance Member ID", text: $insuranceMemberId)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .focused($focusedField, equals: .insuranceMemberId)
-            }
-        }
-    }
+
     
-    // Step 4: Allergies
-    private var allergiesStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Allergies")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            VStack(spacing: 12) {
-                TextField("Known Allergies", text: $allergies, axis: .vertical)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .focused($focusedField, equals: .allergies)
-                    .lineLimit(3...6)
-            }
-        }
-    }
+
     
-    // Step 5: Physical Measurements
-    private var physicalMeasurementsStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Physical Measurements")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            VStack(spacing: 12) {
-                VStack(spacing: 4) {
-                    HStack {
-                        Text("Height:")
-                        Picker("Feet", selection: $heightFeet) {
-                            ForEach((4...7).map { String($0) }, id: \.self) { ft in
-                                Text("\(ft) ft").tag(ft)
-                            }
-                        }
-                        .pickerStyle(MenuPickerStyle())
-                        
-                        Picker("Inches", selection: $heightInches) {
-                            ForEach((0...11).map { String($0) }, id: \.self) { inch in
-                                Text("\(inch) in").tag(inch)
-                            }
-                        }
-                        .pickerStyle(MenuPickerStyle())
-                    }
-                    
-                    HStack {
-                        Image(systemName: "heart.fill")
-                            .foregroundColor(.red)
-                            .font(.caption2)
-                        Text("Height data from Apple Health")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                }
-                
-                VStack(spacing: 4) {
-                    HStack {
-                        Text("Weight:")
-                        Picker("Weight", selection: $weight) {
-                            ForEach((80...400).map { String($0) }, id: \.self) { lbs in
-                                Text("\(lbs) lbs").tag(lbs)
-                            }
-                        }
-                        .pickerStyle(MenuPickerStyle())
-                    }
-                    
-                    HStack {
-                        Image(systemName: "heart.fill")
-                            .foregroundColor(.red)
-                            .font(.caption2)
-                        Text("Weight data from Apple Health")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                    }
-                }
-            }
-        }
-    }
+
     
-    // Step 6: Chronic Conditions
-    private var chronicConditionsStep: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Chronic Conditions")
-                .font(.headline)
-                .fontWeight(.semibold)
-            
-            VStack(spacing: 12) {
-                Text("Select any chronic conditions you have:")
-                    .font(.subheadline)
-                
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 2), spacing: 8) {
-                    ForEach(chronicConditions, id: \.self) { condition in
-                        Button(action: {
-                            if selectedConditions.contains(condition) {
-                                selectedConditions.remove(condition)
-                            } else {
-                                selectedConditions.insert(condition)
-                            }
-                        }) {
-                            Text(condition)
-                                .font(.caption)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 8)
-                                .background(selectedConditions.contains(condition) ? Color.blue : Color.gray.opacity(0.2))
-                                .foregroundColor(selectedConditions.contains(condition) ? .white : .primary)
-                                .cornerRadius(8)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                }
-                
-                TextField("Other conditions (optional)", text: $otherConditions, axis: .vertical)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
-                    .focused($focusedField, equals: .otherConditions)
-                    .lineLimit(2...4)
-            }
-        }
-    }
+
     
-    // Step 7: Account Setup
+
+    
+    // Step 2: Account Setup
     private var accountSetupStep: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Account Setup")
+            Text("Create Your Account")
                 .font(.headline)
                 .fontWeight(.semibold)
+            
+            Text("You can complete your full profile (address, insurance, medical history) later in the Profile section or sync with Apple Health.")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.leading)
             
             VStack(spacing: 12) {
                 TextField("Email", text: $email)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(EnhancedTextFieldStyle())
                     .focused($focusedField, equals: .email)
                     .textContentType(.emailAddress)
                     .keyboardType(.emailAddress)
                     .autocapitalization(.none)
                 
                 SecureField("Password", text: $password)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(EnhancedTextFieldStyle())
                     .focused($focusedField, equals: .password)
                     .textContentType(.newPassword)
                 
                 SecureField("Confirm Password", text: $confirmPassword)
-                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .textFieldStyle(EnhancedTextFieldStyle())
                     .focused($focusedField, equals: .confirmPassword)
                     .textContentType(.newPassword)
+                
+                // Password requirements
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Password Requirements:")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    
+                    HStack {
+                        Image(systemName: password.count >= 6 ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(password.count >= 6 ? .green : .gray)
+                            .font(.caption)
+                        Text("At least 6 characters")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    
+                    HStack {
+                        Image(systemName: password == confirmPassword && !password.isEmpty ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(password == confirmPassword && !password.isEmpty ? .green : .gray)
+                            .font(.caption)
+                        Text("Passwords match")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                }
+                .padding(.top, 8)
             }
         }
     }
@@ -677,13 +430,8 @@ struct AuthenticationView: View {
         switch currentStep {
         case 1:
             return !firstName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                   !lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                   !phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case 3:
-            return !insuranceProvider.isEmpty
-        case 6:
-            return !selectedConditions.isEmpty || !otherConditions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case 7:
+                   !lastName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case 2:
             return isRegistrationFormValid
         default:
             return true
@@ -703,13 +451,6 @@ struct AuthenticationView: View {
     }
     
     private func handleRegistration() {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        let dobString = dateFormatter.string(from: dob)
-        
-        let chronicConditionsString = Array(selectedConditions).joined(separator: ", ") + 
-            (otherConditions.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "" : ", " + otherConditions.trimmingCharacters(in: .whitespacesAndNewlines))
-        
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
         
@@ -718,21 +459,7 @@ struct AuthenticationView: View {
                 withEmail: trimmedEmail,
                 password: trimmedPassword,
                 firstName: firstName.trimmingCharacters(in: .whitespacesAndNewlines),
-                lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines),
-                dob: dobString,
-                gender: gender,
-                phoneNumber: phoneNumber.trimmingCharacters(in: .whitespacesAndNewlines),
-                street: street.trimmingCharacters(in: .whitespacesAndNewlines),
-                city: city.trimmingCharacters(in: .whitespacesAndNewlines),
-                state: state,
-                zip: zip.trimmingCharacters(in: .whitespacesAndNewlines),
-                insuranceProvider: insuranceProvider,
-                insuranceMemberId: insuranceMemberId.trimmingCharacters(in: .whitespacesAndNewlines),
-                allergies: allergies.trimmingCharacters(in: .whitespacesAndNewlines),
-                chronicConditions: chronicConditionsString,
-                heightFeet: heightFeet,
-                heightInches: heightInches,
-                weight: weight
+                lastName: lastName.trimmingCharacters(in: .whitespacesAndNewlines)
             )
         }
     }
@@ -740,21 +467,6 @@ struct AuthenticationView: View {
     private func clearForm() {
         firstName = ""
         lastName = ""
-        dob = Date()
-        gender = ""
-        phoneNumber = ""
-        street = ""
-        city = ""
-        state = ""
-        zip = ""
-        insuranceProvider = ""
-        insuranceMemberId = ""
-        allergies = ""
-        heightFeet = ""
-        heightInches = ""
-        weight = ""
-        selectedConditions.removeAll()
-        otherConditions = ""
         email = ""
         password = ""
         confirmPassword = ""
@@ -763,42 +475,5 @@ struct AuthenticationView: View {
         focusedField = nil
     }
     
-    private func syncWithHealthKitForRegistration() {
-        HealthKitManager.shared.requestAuthorization { success in
-            guard success else { return }
-            
-            // Fetch characteristics
-            do {
-                let characteristics = try HealthKitManager.shared.fetchCharacteristics()
-                if let dobFromHealth = characteristics.dateOfBirth {
-                    self.dob = dobFromHealth
-                }
-                if let sexObject = characteristics.biologicalSex {
-                    switch sexObject.biologicalSex {
-                    case .female: self.gender = "Female"
-                    case .male: self.gender = "Male"
-                    case .other: self.gender = "Other"
-                    default: self.gender = ""
-                    }
-                }
-            } catch {
-                print("Failed to fetch characteristics: \(error)")
-            }
-            
-            // Fetch height and weight
-            HealthKitManager.shared.fetchMostRecentHeight { heightInInches in
-                if let height = heightInInches {
-                    self.heightFeet = String(Int(height / 12))
-                    self.heightInches = String(Int(height.truncatingRemainder(dividingBy: 12)))
-                }
-            }
-            HealthKitManager.shared.fetchMostRecentWeight { weightInPounds in
-                if let weight = weightInPounds {
-                    self.weight = String(Int(weight.rounded()))
-                }
-            }
-            
-            
-        }
-    }
+
 }
