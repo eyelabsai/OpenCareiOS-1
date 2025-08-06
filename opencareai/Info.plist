@@ -46,5 +46,9 @@
 	<string>OpenCare uses HealthKit to read your height, weight, date of birth, biological sex, and medication records to pre-populate your profile and provide personalized health insights and visit preparation.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>OpenCare writes medication tracking data to HealthKit to synchronize your medication schedule between this app and the Apple Health app, helping you maintain accurate health records.</string>
+	<key>NSHealthRecordsUsageDescription</key>
+	<string>OpenCare needs access to your health records including medication information from Apple Health to sync your medications and provide comprehensive health insights.</string>
+	<key>NSHealthClinicalHealthRecordsShareUsageDescription</key>
+	<string>OpenCare needs access to your clinical health records including medication information from healthcare providers to sync your medications and provide comprehensive health insights.</string>
 </dict>
 </plist>

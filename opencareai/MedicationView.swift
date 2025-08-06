@@ -164,34 +164,29 @@ struct MedicationView: View {
                     )
                 }
             }
+            .alert("Apple Health Sync", isPresented: $showingSyncAlert) {
+                Button("OK") { 
+                    showingSyncAlert = false 
+                    syncStatus = ""
+                }
+            } message: {
+                Text(syncStatus)
+            }
         }
     }
     
+    @State private var syncStatus: String = ""
+    @State private var showingSyncAlert = false
+    
     private func syncMedicationsWithHealthKit() {
-        HealthKitManager.shared.requestAuthorization { success in
-            guard success else { 
-                print("HealthKit authorization denied")
-                return 
-            }
+        Task {
+            syncStatus = "Syncing with Apple Health..."
+            let result = await medicationViewModel.syncWithAppleHealth()
+            syncStatus = result
+            showingSyncAlert = true
             
-            HealthKitManager.shared.performTwoWayMedicationSync(appMedications: medicationViewModel.medications) { syncResult in
-                print("🔄 Two-Way Medication Sync Complete:")
-                print(syncResult.summary)
-                
-                // Log details for debugging
-                if !syncResult.matchedMedications.isEmpty {
-                    print("✅ Matched medications with HealthKit data")
-                }
-                
-                if !syncResult.unmatchedHealthKitRecords.isEmpty {
-                    print("🆕 Found new medications in HealthKit that could be added to your app")
-                }
-                
-                if !syncResult.medicationsToWriteToHealthKit.isEmpty {
-                    let status = syncResult.healthKitWriteSuccess ? "✅" : "❌"
-                    print("\(status) Wrote your app medications to HealthKit")
-                }
-            }
+            print("🔄 Apple Health Medication Sync Complete:")
+            print(result)
         }
     }
 }
