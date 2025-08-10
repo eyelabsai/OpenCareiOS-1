@@ -8,6 +8,7 @@ struct ContentView: View {
     @StateObject var statsViewModel = StatsViewModel() // Shared instance
     @StateObject var audioRecorder = AudioRecorder() // Shared instance
     @State private var selectedTab = 0
+    @State private var showOnboarding = false
     
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -56,6 +57,18 @@ struct ContentView: View {
             let appearance = UITabBarAppearance()
             appearance.configureWithOpaqueBackground()
             UITabBar.appearance().scrollEdgeAppearance = appearance
+            
+            // Always show onboarding for testing (remove this later)
+            showOnboarding = true
+            
+            // Original logic (commented out for testing):
+            // let hasCompletedOnboarding = UserDefaults.standard.bool(forKey: "hasCompletedOnboarding")
+            // if !hasCompletedOnboarding {
+            //     showOnboarding = true
+            // }
+        }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingView(showOnboarding: $showOnboarding)
         }
     }
 }

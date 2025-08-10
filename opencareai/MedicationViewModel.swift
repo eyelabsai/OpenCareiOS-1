@@ -288,7 +288,7 @@ class MedicationViewModel: ObservableObject {
                         }
                     } else {
                         // Create new medication
-                        var newMedication = Medication(
+                        let newMedication = Medication(
                             id: nil,
                             userId: nil,
                             name: action.medicationName,
@@ -392,6 +392,39 @@ class MedicationViewModel: ObservableObject {
     func deleteMedication(_ medication: Medication) {
         Task {
             await deleteMedication(medication)
+        }
+    }
+    
+    // MARK: - Apple Health Sync
+    @MainActor
+    func syncWithAppleHealth() async -> String {
+        guard let userId = Auth.auth().currentUser?.uid else {
+            errorMessage = "User not authenticated"
+            return "Authentication required"
+        }
+        
+        return await withCheckedContinuation { continuation in
+            HealthKitManager.shared.requestAuthorization { success in
+                guard success else {
+                    continuation.resume(returning: "HealthKit authorization denied")
+                    return
+                }
+                
+                // Use modern sync approach
+                HealthKitManager.shared.syncAppleHealthMedicationsToApp(existingMedications: self.medications) { result in
+                    Task {
+                        // Add new medications to the app
+                        for newMedication in result.newMedicationsToAdd {
+                            await self.createMedication(newMedication)
+                        }
+                        
+                        // Reload medications after sync
+                        await self.loadMedicationsAsync()
+                        
+                        continuation.resume(returning: result.summary)
+                    }
+                }
+            }
         }
     }
 }

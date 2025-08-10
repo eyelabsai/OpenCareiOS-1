@@ -42,6 +42,7 @@ struct AnalyticsView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
     }
 
     // MARK: - Visits by Specialty Chart

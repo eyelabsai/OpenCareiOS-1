@@ -21,11 +21,8 @@ class HealthKitManager {
                 HKObjectType.quantityType(forIdentifier: .bodyMass)!
             ]
             
-            // Add medication tracking if available (iOS 16+)
-            if #available(iOS 16.0, *) {
-                // Use mindful session as a workaround for medication tracking until proper API is available
-                types.insert(HKObjectType.categoryType(forIdentifier: .mindfulSession)!)
-            }
+            // Add clinical medication records
+            types.insert(HKClinicalType(.medicationRecord))
             
             return types
         }
@@ -33,7 +30,7 @@ class HealthKitManager {
     private var writeTypes: Set<HKSampleType> {
         var types: Set<HKSampleType> = []
         
-        // Add medication tracking if available (iOS 16+)
+        // Add fallback to mindful session workaround for iOS 16+
         if #available(iOS 16.0, *) {
             types.insert(HKObjectType.categoryType(forIdentifier: .mindfulSession)!)
         }
@@ -97,7 +94,116 @@ class HealthKitManager {
 
     // MARK: - Medication Syncing
     
+    func fetchAppleHealthMedications(completion: @escaping ([AppleHealthMedication]) -> Void) {
+        print("🔄 Fetching medications from Apple Health")
+        
+        // First try to fetch clinical medication records
+        fetchClinicalMedicationRecords { clinicalMedications in
+            // Then try to fetch user-entered medications (if iOS 15+ APIs are available)
+            self.fetchUserAnnotatedMedications { userMedications in
+                let allMedications = clinicalMedications + userMedications
+                print("✅ Fetched \(allMedications.count) medications from Apple Health (\(clinicalMedications.count) clinical, \(userMedications.count) user-entered)")
+                completion(allMedications)
+            }
+        }
+    }
+    
+    func fetchClinicalMedicationRecords(completion: @escaping ([AppleHealthMedication]) -> Void) {
+        let medicationType = HKClinicalType(.medicationRecord)
+        
+        // Create predicate for medication statements
+        let predicate = HKQuery.predicateForClinicalRecords(withFHIRResourceType: .medicationStatement)
+        
+        let sortDescriptor = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)
+        
+        let query = HKSampleQuery(
+            sampleType: medicationType,
+            predicate: predicate,
+            limit: 100,
+            sortDescriptors: [sortDescriptor]
+        ) { _, samples, error in
+            if let error = error {
+                print("❌ Error fetching clinical medication records: \(error.localizedDescription)")
+                DispatchQueue.main.async { completion([]) }
+                return
+            }
+            
+            let medications = samples?.compactMap { sample -> AppleHealthMedication? in
+                guard let clinicalRecord = sample as? HKClinicalRecord else { return nil }
+                
+                // Parse FHIR data for medication information
+                if let fhirResource = clinicalRecord.fhirResource,
+                   let json = try? JSONSerialization.jsonObject(with: fhirResource.data) as? [String: Any] {
+                    
+                    // Extract medication name from FHIR resource
+                    var medicationName: String?
+                    var dosage: String?
+                    
+                    // Try to extract medication name from various FHIR fields
+                    if let medicationCodeableConcept = json["medicationCodeableConcept"] as? [String: Any],
+                       let coding = medicationCodeableConcept["coding"] as? [[String: Any]],
+                       let firstCoding = coding.first,
+                       let display = firstCoding["display"] as? String {
+                        medicationName = display
+                    } else if let medicationReference = json["medicationReference"] as? [String: Any],
+                              let display = medicationReference["display"] as? String {
+                        medicationName = display
+                    }
+                    
+                    // Try to extract dosage information
+                    if let dosageInstruction = json["dosageInstruction"] as? [[String: Any]],
+                       let firstDosage = dosageInstruction.first,
+                       let text = firstDosage["text"] as? String {
+                        dosage = text
+                    }
+                    
+                    if let name = medicationName {
+                        return AppleHealthMedication(
+                            displayName: name,
+                            brandName: nil,
+                            genericName: name,
+                            medicationIdentifier: clinicalRecord.fhirResource?.identifier,
+                            dosageFormCode: nil,
+                            strengthQuantity: nil,
+                            dosageString: dosage ?? "As prescribed"
+                        )
+                    }
+                }
+                
+                return nil
+            } ?? []
+            
+            DispatchQueue.main.async {
+                completion(medications)
+            }
+        }
+        
+        healthStore.execute(query)
+    }
+    
+    func fetchUserAnnotatedMedications(completion: @escaping ([AppleHealthMedication]) -> Void) {
+        // Unfortunately, user-entered medications in Apple Health are NOT accessible 
+        // via HealthKit APIs in the current iOS versions.
+        // 
+        // According to Apple Developer Forums, medications manually entered by users 
+        // in the Health app are not available through HealthKit APIs.
+        // 
+        // Only clinical medication records (from healthcare providers) can be accessed.
+        
+        print("ℹ️ User-entered medications are not accessible via HealthKit APIs")
+        print("ℹ️ Only clinical medication records from healthcare providers can be read")
+        
+        completion([])
+    }
+    
     func fetchMedicationDoses(completion: @escaping ([HKCategorySample]) -> Void) {
+        if #available(iOS 18.0, *) {
+            // For iOS 18+, we'll focus on reading medications directly
+            // This method is kept for backward compatibility
+            completion([])
+            return
+        }
+        
         guard #available(iOS 16.0, *) else {
             print("Medication tracking requires iOS 16.0 or later")
             completion([])
@@ -172,22 +278,72 @@ class HealthKitManager {
     }
     
     func syncMedicationsFromHealthKit(completion: @escaping ([MedicationDoseRecord]) -> Void) {
-        fetchMedicationDoses { samples in
-            let records = samples.compactMap { sample -> MedicationDoseRecord? in
-                guard let medicationName = sample.metadata?["medicationName"] as? String else {
-                    return nil
-                }
-                
-                let dosage = sample.metadata?["medicationDosage"] as? String ?? 
-                            "Unknown dosage"
-                
-                return MedicationDoseRecord(
-                    name: medicationName,
-                    dosage: dosage,
-                    dateTaken: sample.startDate
+        // Use the unified medication fetching approach
+        fetchAppleHealthMedications { appleHealthMedications in
+            let records = appleHealthMedications.map { medication in
+                MedicationDoseRecord(
+                    name: medication.preferredName,
+                    dosage: medication.effectiveDosageString,
+                    dateTaken: Date() // Since we don't have dose events, use current date as placeholder
                 )
             }
             completion(records)
+        }
+    }
+    
+    // MARK: - Modern Sync
+    
+    func syncAppleHealthMedicationsToApp(
+        existingMedications: [Medication],
+        completion: @escaping (AppleHealthSyncResult) -> Void
+    ) {
+        fetchAppleHealthMedications { appleHealthMedications in
+            var newMedications: [Medication] = []
+            var matchedCount = 0
+            
+            for appleHealthMed in appleHealthMedications {
+                let normalizedName = self.normalizedMedicationName(appleHealthMed.preferredName)
+                
+                // Check if medication already exists in app
+                let existsInApp = existingMedications.contains { appMed in
+                    self.normalizedMedicationName(appMed.name) == normalizedName
+                }
+                
+                if existsInApp {
+                    matchedCount += 1
+                } else {
+                    // Create new medication from Apple Health data
+                    let newMedication = Medication(
+                        id: nil,
+                        userId: nil,
+                        name: appleHealthMed.preferredName,
+                        dosage: appleHealthMed.effectiveDosageString,
+                        frequency: "As prescribed",
+                        timing: nil,
+                        route: nil,
+                        laterality: nil,
+                        duration: nil,
+                        instructions: nil,
+                        fullInstructions: "Synced from Apple Health",
+                        isActive: true,
+                        discontinuationReason: nil,
+                        createdAt: nil,
+                        updatedAt: nil,
+                        discontinuedDate: nil
+                    )
+                    newMedications.append(newMedication)
+                }
+            }
+            
+            let result = AppleHealthSyncResult(
+                totalAppleHealthMedications: appleHealthMedications.count,
+                newMedicationsToAdd: newMedications,
+                matchedMedications: matchedCount
+            )
+            
+            DispatchQueue.main.async {
+                completion(result)
+            }
         }
     }
     
@@ -385,6 +541,41 @@ struct MedicationDoseRecord {
     let dateTaken: Date
 }
 
+struct AppleHealthMedication {
+    let displayName: String
+    let brandName: String?
+    let genericName: String?
+    let medicationIdentifier: String?
+    let dosageFormCode: String?
+    let strengthQuantity: HKQuantity?
+    let dosageString: String? // Add explicit dosage string for compatibility
+    
+    var preferredName: String {
+        return brandName ?? genericName ?? displayName
+    }
+    
+    var effectiveDosageString: String {
+        if let dosageString = dosageString {
+            return dosageString
+        }
+        if let quantity = strengthQuantity {
+            return quantity.description
+        }
+        return "Unknown dosage"
+    }
+    
+    // Convenience initializer for legacy support
+    init(displayName: String, brandName: String?, genericName: String?, medicationIdentifier: String?, dosageFormCode: String?, strengthQuantity: HKQuantity?, dosageString: String? = nil) {
+        self.displayName = displayName
+        self.brandName = brandName
+        self.genericName = genericName
+        self.medicationIdentifier = medicationIdentifier
+        self.dosageFormCode = dosageFormCode
+        self.strengthQuantity = strengthQuantity
+        self.dosageString = dosageString
+    }
+}
+
 struct MedicationMatch {
     let appMedication: Medication
     let healthKitRecords: [MedicationDoseRecord]
@@ -408,5 +599,15 @@ struct MedicationSyncResult {
         let written = medicationsToWriteToHealthKit.count
         
         return "Matched: \(matched), New from HealthKit: \(unmatched), Written to HealthKit: \(written)"
+    }
+}
+
+struct AppleHealthSyncResult {
+    let totalAppleHealthMedications: Int
+    let newMedicationsToAdd: [Medication]
+    let matchedMedications: Int
+    
+    var summary: String {
+        return "Found \(totalAppleHealthMedications) medications in Apple Health. \(newMedicationsToAdd.count) new, \(matchedMedications) already in app."
     }
 }
