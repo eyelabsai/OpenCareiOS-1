@@ -125,6 +125,7 @@ struct AuthenticationView: View {
             )
             .navigationBarHidden(true)
         }
+        .navigationViewStyle(.stack)
     }
     
     private var loginForm: some View {
