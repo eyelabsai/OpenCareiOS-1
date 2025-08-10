@@ -203,6 +203,7 @@ struct ProfileView: View {
                 })
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     // MARK: - Subviews
@@ -972,6 +973,7 @@ struct HealthKitExplanationView: View {
             .navigationTitle("")
             .navigationBarHidden(true)
         }
+        .navigationViewStyle(.stack)
     }
 }
 

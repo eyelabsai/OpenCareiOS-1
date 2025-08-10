@@ -173,6 +173,7 @@ struct MedicationView: View {
                 Text(syncStatus)
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     @State private var syncStatus: String = ""
@@ -361,6 +362,7 @@ struct MedicationDetailView: View {
                 } }
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     private func format(_ d: Date) -> String {

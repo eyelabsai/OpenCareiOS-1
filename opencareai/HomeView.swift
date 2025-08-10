@@ -158,6 +158,7 @@ struct HomeView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
     }
 }
 
@@ -366,6 +367,7 @@ struct NewVisitView: View {
                 }
             }
         }
+        .navigationViewStyle(.stack)
     }
     
     private func handleRecordingAction() {

@@ -96,6 +96,7 @@ struct VisitHistoryView: View {
                 await viewModel.fetchVisits()
             }
         }
+        .navigationViewStyle(.stack)
     }
 }
 
@@ -254,5 +255,6 @@ struct MedicationsListView: View {
                 ToolbarItem(placement: .navigationBarTrailing) { Button("Done") { dismiss() } }
             }
         }
+        .navigationViewStyle(.stack)
     }
 }
