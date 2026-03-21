@@ -62,6 +62,7 @@ class VisitViewModel: ObservableObject {
         }
     }
     
+    // New-visit parity: `/Users/gurpalvirdi/OpenCare/public/new-visit.html`
     /// Shared save path aligned with web `saveVisitAndMedications`: warnings → create visit → stop/modify → add new meds.
     @MainActor
     private func persistVisitFromSummary(_ summary: VisitSummary, userId: String, transcript: String) async throws {

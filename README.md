@@ -1,9 +1,14 @@
-   # OpenCareAI iOS App
+# OpenCareAI iOS App
 
-   The github repo contains a file called  "OpenCare" which is the web app folder taken from the Web App Repo. 
+The **OpenCare web app** (API routes, summarization, medication verification, Firebase client parity) lives in a separate checkout:
 
-   It is not part of the iOS app build and is only used locally for reference when using Cursor.
-   
-   The folder "opencareai" is the iOS app files
+`/Users/gurpalvirdi/OpenCare`
 
-   
+The **new visit** UI and client-side flow to keep in sync with iOS **Record New Visit** is:
+
+`/Users/gurpalvirdi/OpenCare/public/new-visit.html`
+
+Use that project for backend changes, local `npm` dev server, and Vercel deployment. It is not vendored inside this iOS repository.
+
+The **`opencareai`** folder contains the Xcode / SwiftUI iOS app.
+

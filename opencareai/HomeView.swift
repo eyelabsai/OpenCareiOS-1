@@ -163,7 +163,9 @@ struct HomeView: View {
     }
 }
 
-// MARK: - New Visit Recording View  
+// MARK: - New Visit Recording View
+// Web parity for this flow lives at:
+// `/Users/gurpalvirdi/OpenCare/public/new-visit.html` (repo root: `/Users/gurpalvirdi/OpenCare`).
 struct NewVisitView: View {
     @EnvironmentObject var visitViewModel: VisitViewModel
     @EnvironmentObject var audioRecorder: AudioRecorder
@@ -179,9 +181,12 @@ struct NewVisitView: View {
     @State private var detectedMedicationActions: [MedicationAction] = []
     @State private var currentStep: ProcessingStep = .ready
     
-    // MARK: - Test Mode (for development/testing)
-    @State private var showTestInput = false
+    // MARK: - Test input (Skip Recording) — parity with `new-visit.html` test card; field is not cleared by `clearVisitDraftState()`.
     @State private var testTranscript: String = ""
+    /// Matches web discard: `statusEl.textContent = 'Visit discarded. Ready to record.'`
+    @State private var idleStatusMessage: String?
+    /// Recreate `MedicationVerificationView` when opening a new verification pass (stable state vs Firestore-sized action lists).
+    @State private var medicationVerificationSession = UUID()
     
     enum ProcessingStep {
         case ready, transcribing, analyzing, extractingMedications, generatingSummary, complete
@@ -214,19 +219,23 @@ struct NewVisitView: View {
             ScrollView {
                 VStack(spacing: 24) {
                     
-                    // Header
+                    // Header (web: `<h1>Record New Visit</h1>` + Step 1 card)
                     VStack(spacing: 8) {
                         Image(systemName: currentStep.icon)
                             .font(.system(size: 64))
                             .foregroundColor(.blue)
                             .animation(.easeInOut(duration: 0.3), value: currentStep)
                         
-                        Text("Record Your Visit")
+                        Text("Record New Visit")
                             .font(.largeTitle)
                             .fontWeight(.bold)
                         
+                        Text("Step 1: Record Audio")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        
                         Text("💡 For longer visits (1+ minutes), speak clearly and pause between topics. The system can handle recordings up to 50MB.")
-                                .font(.subheadline)
+                            .font(.subheadline)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
@@ -325,41 +334,25 @@ struct NewVisitView: View {
                             .multilineTextAlignment(.center)
                     }
                     
-                    // MARK: - Test Mode Input (for development)
-                    VStack(spacing: 12) {
-                        Button(action: { showTestInput.toggle() }) {
-                            HStack {
-                                Image(systemName: showTestInput ? "chevron.down" : "chevron.right")
-                                Text("Test Mode (Type Transcript)")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                Spacer()
-                            }
-                            .foregroundColor(.orange)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        if showTestInput {
-                            VStack(spacing: 12) {
-                                Text("Enter transcript text to simulate audio recording:")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                
-                                TextEditor(text: $testTranscript)
-                                    .frame(minHeight: 120)
-                                    .padding(8)
-                                    .background(Color(.systemGray6))
-                                    .cornerRadius(8)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-                                    )
-                                
-                                Button(action: submitTestTranscript) {
-                                    HStack {
-                                        Image(systemName: "play.fill")
-                                        Text("Process as Transcript")
-                                    }
+                    // MARK: - Test Input — web order: Step 1 card, then `#testInputCard`, then Step 2
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("🧪 Test Input (Skip Recording)")
+                            .font(.headline)
+                        Text("Paste a transcript below to test summarization and medication extraction without recording audio.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        TextEditor(text: $testTranscript)
+                            .frame(minHeight: 120)
+                            .padding(8)
+                            .background(Color(.systemGray6))
+                            .cornerRadius(8)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                            )
+                        HStack(spacing: 12) {
+                            Button(action: submitTestTranscript) {
+                                Text("🧠 Process Transcript")
                                     .font(.subheadline)
                                     .fontWeight(.semibold)
                                     .foregroundColor(.white)
@@ -367,21 +360,60 @@ struct NewVisitView: View {
                                     .padding(.vertical, 12)
                                     .background(testTranscript.isEmpty ? Color.orange.opacity(0.5) : Color.orange)
                                     .cornerRadius(10)
-                                }
-                                .disabled(testTranscript.isEmpty || visitViewModel.isLoading)
                             }
-                            .padding()
-                            .background(Color.orange.opacity(0.05))
-                            .cornerRadius(12)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(Color.orange.opacity(0.2), lineWidth: 1)
-                            )
+                            .disabled(testTranscript.isEmpty || visitViewModel.isLoading)
+                            Button("Clear") {
+                                testTranscript = ""
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(testTranscript.isEmpty)
                         }
                     }
+                    .padding()
+                    .background(Color.orange.opacity(0.05))
+                    .cornerRadius(12)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                    )
                     .padding(.horizontal)
                     
-                    // Medication Verification Section
+                    // Step 2: Transcribe & Review (web `#transcript` — always visible with placeholder)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Step 2: Transcribe & Review")
+                            .font(.headline)
+                        ScrollView {
+                            Text(visitViewModel.transcript.isEmpty
+                                 ? "Your live transcription will appear here..."
+                                 : visitViewModel.transcript)
+                                .font(.body)
+                                .foregroundColor(visitViewModel.transcript.isEmpty ? .secondary : .primary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(minHeight: 100, maxHeight: 220)
+                    }
+                    .padding()
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    .padding(.horizontal)
+                    
+                    // Step 3 summary first, then medication verification (matches web `#summaryCard` layout order)
+                    if let summary = visitViewModel.visitSummary {
+                        NewVisitSummaryView(
+                            summary: summary,
+                            showPrimaryActions: !showingMedicationVerification,
+                            onSave: {
+                                Task {
+                                    await visitViewModel.saveVisitFromSummary()
+                                    dismiss()
+                                }
+                            },
+                            onDiscard: {
+                                clearVisitDraftState(afterDiscard: true)
+                            }
+                        )
+                    }
+                    
                     if showingMedicationVerification {
                         MedicationVerificationView(
                             medications: detectedMedications,
@@ -393,29 +425,14 @@ struct NewVisitView: View {
                             },
                             onEdit: { editedMeds in
                                 detectedMedications = editedMeds
-                            }
-                        )
-                    }
-                    
-                    // Visit Summary (enhanced layout)
-                    if let summary = visitViewModel.visitSummary {
-                        NewVisitSummaryView(
-                            summary: summary,
-                            onSave: {
-                                Task {
-                                    await visitViewModel.saveVisitFromSummary()
-                                    dismiss()
-                                }
+                                idleStatusMessage = "Medication editing mode: Edit medications above, then tap \"Confirm & Save Visit\" when ready."
                             },
-                            onDiscard: {
-                                visitViewModel.resetRecording()
-                                showingMedicationVerification = false
-                                detectedMedications = []
-                                detectedMedicationActions = []
-                                showingProcessingSteps = false
-                                currentStep = .ready
+                            onRemoveMedicationAction: { index in
+                                guard detectedMedicationActions.indices.contains(index) else { return }
+                                detectedMedicationActions.remove(at: index)
                             }
                         )
+                        .id(medicationVerificationSession)
                     }
                     
                     // Error Message with better styling
@@ -433,7 +450,8 @@ struct NewVisitView: View {
                         if audioRecorder.isRecording {
                             _ = audioRecorder.stopRecording()
                         }
-                        visitViewModel.resetRecording()
+                        clearVisitDraftState()
+                        testTranscript = ""
                         dismiss()
                     }
                 }
@@ -453,12 +471,33 @@ struct NewVisitView: View {
         .navigationViewStyle(.stack)
     }
     
+    /// Clears pending visit/summary/medication UI (matches web `clearDraftState()`; does not clear the test transcript field).
+    private func clearVisitDraftState(afterDiscard: Bool = false) {
+        idleStatusMessage = nil
+        visitViewModel.resetRecording()
+        showingMedicationVerification = false
+        detectedMedications = []
+        detectedMedicationActions = []
+        showingProcessingSteps = false
+        currentStep = .ready
+        showChronicConditionsSheet = false
+        chronicConditionsPromptItems = []
+        if afterDiscard {
+            idleStatusMessage = "Visit discarded. Ready to record."
+        }
+    }
+    
     /// After summary is ready: offer profile merge for new chronic conditions (web `showChronicConditionsModal`), then medication verification.
     private func openMedicationVerificationIfNeeded() {
         guard let summary = visitViewModel.visitSummary else { return }
-        detectedMedications = summary.medications
-        detectedMedicationActions = summary.medicationActions
+        let prepared = MedicationNameMatcher.medicationsAndActionsForNewVisitVerification(
+            medications: summary.medications,
+            medicationActions: summary.medicationActions
+        )
+        detectedMedications = prepared.0
+        detectedMedicationActions = prepared.1
         if !detectedMedications.isEmpty || !detectedMedicationActions.isEmpty {
+            medicationVerificationSession = UUID()
             showingMedicationVerification = true
         }
     }
@@ -483,33 +522,24 @@ struct NewVisitView: View {
         if audioRecorder.isRecording {
             // Stop recording and process
             if let audioData = audioRecorder.stopRecording() {
-                currentStep = .transcribing
-                showingProcessingSteps = true
-                
-                Task {
+                Task { @MainActor in
                     await processAudioWithSteps(audioData)
                 }
             }
         } else {
-            // Start a fresh recording: clear any previous summary/transcript/UI state
-            visitViewModel.resetRecording()
-            showingMedicationVerification = false
-            detectedMedications = []
-            detectedMedicationActions = []
-            showingProcessingSteps = false
-            currentStep = .ready
+            // Start a fresh recording (web: `clearDraftState` before capture; test paste field left intact)
+            clearVisitDraftState()
             Task {
                 await audioRecorder.startRecording()
             }
         }
     }
     
+    @MainActor
     private func processAudioWithSteps(_ audioData: Data) async {
-        await MainActor.run {
-            visitViewModel.clearPendingSummary()
-        }
-        // Step 1: Transcribing
+        clearVisitDraftState()
         currentStep = .transcribing
+        showingProcessingSteps = true
         try? await Task.sleep(nanoseconds: 800_000_000) // 0.8 seconds
         
         // Step 2: Analyzing
@@ -534,30 +564,25 @@ struct NewVisitView: View {
     private func processMedicationVerification(medications: [Medication], actions: [MedicationAction]) async {
         visitViewModel.applyVerifiedMedicationData(medications: medications, medicationActions: actions)
         showingMedicationVerification = false
+        idleStatusMessage = "Medications confirmed. Use \"Confirm & Save Visit\" to finish."
     }
     
     /// Submit typed transcript for testing (skips audio recording)
     private func submitTestTranscript() {
-        guard !testTranscript.isEmpty else { return }
+        let trimmed = testTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
         
-        // Clear previous state
-        visitViewModel.resetRecording()
-        showingMedicationVerification = false
-        detectedMedications = []
-        detectedMedicationActions = []
+        clearVisitDraftState()
         
         // Show processing UI
         currentStep = .transcribing
         showingProcessingSteps = true
         
-        Task {
-            await MainActor.run {
-                visitViewModel.clearPendingSummary()
-            }
-            
+        Task { @MainActor in
+            idleStatusMessage = "Processing test transcript..."
             // Step 1: Transcribing (simulated - we already have the text)
             currentStep = .transcribing
-            visitViewModel.transcript = testTranscript
+            visitViewModel.transcript = trimmed
             try? await Task.sleep(nanoseconds: 400_000_000) // 0.4 seconds
             
             // Step 2: Analyzing
@@ -577,12 +602,7 @@ struct NewVisitView: View {
             
             currentStep = .complete
             showingProcessingSteps = false
-            
-            // Clear test input
-            await MainActor.run {
-                testTranscript = ""
-                showTestInput = false
-            }
+            idleStatusMessage = nil
         }
     }
     
@@ -602,10 +622,12 @@ struct NewVisitView: View {
             return "Recording in progress..."
         } else if visitViewModel.isLoading {
             return currentStep.title
+        } else if let idle = idleStatusMessage {
+            return idle
         } else if visitViewModel.visitSummary != nil {
-            return "Processing complete! Review your visit summary below."
+            return "Summary generated successfully!"
         } else {
-            return "Tap the microphone to start recording your medical visit"
+            return "Ready to record."
         }
     }
 }
@@ -684,15 +706,23 @@ struct MedicationVerificationView: View {
     let medicationActions: [MedicationAction]
     let onConfirm: ([Medication], [MedicationAction]) -> Void
     let onEdit: ([Medication]) -> Void
+    var onRemoveMedicationAction: ((Int) -> Void)?
     
     @State private var editableMedications: [Medication]
     @State private var confirmedActions: Set<Int> = []
     
-    init(medications: [Medication], medicationActions: [MedicationAction], onConfirm: @escaping ([Medication], [MedicationAction]) -> Void, onEdit: @escaping ([Medication]) -> Void) {
+    init(
+        medications: [Medication],
+        medicationActions: [MedicationAction],
+        onConfirm: @escaping ([Medication], [MedicationAction]) -> Void,
+        onEdit: @escaping ([Medication]) -> Void,
+        onRemoveMedicationAction: ((Int) -> Void)? = nil
+    ) {
         self.medications = medications
         self.medicationActions = medicationActions
         self.onConfirm = onConfirm
         self.onEdit = onEdit
+        self.onRemoveMedicationAction = onRemoveMedicationAction
         self._editableMedications = State(initialValue: medications)
     }
     
@@ -706,19 +736,21 @@ struct MedicationVerificationView: View {
                 .font(.subheadline)
                 .foregroundColor(.secondary)
             
-            // Show medication actions that need confirmation
             if !medicationActions.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Medication Actions:")
+                    Text("Medication Actions to Process:")
                         .font(.subheadline)
-                        .fontWeight(.medium)
+                        .fontWeight(.semibold)
+                        .foregroundColor(Color(red: 0.1, green: 0.46, blue: 0.82))
                     
                     ForEach(Array(medicationActions.enumerated()), id: \.offset) { index, action in
                         MedicationActionRow(
                             action: action,
                             isConfirmed: confirmedActions.contains(index),
-                            onConfirm: { confirmedActions.insert(index) },
-                            onCancel: { confirmedActions.remove(index) }
+                            onConfirmDiscontinue: { confirmedActions.insert(index) },
+                            onRemoveAction: action.action.isStopLike
+                                ? { onRemoveMedicationAction?(index) }
+                                : nil
                         )
                     }
                 }
@@ -739,14 +771,9 @@ struct MedicationVerificationView: View {
                 }
             }
             
-            // Action buttons
+            // Button order matches web `.verification-actions`: Confirm first, then Edit
             HStack(spacing: 12) {
-                Button("Edit Medications") {
-                    onEdit(editableMedications)
-                }
-                .buttonStyle(.bordered)
-                
-                Button("Confirm & Continue") {
+                Button("✅ Confirm Medications") {
                     let mergedActions: [MedicationAction] = medicationActions.enumerated().compactMap { index, action in
                         if action.action.isStopLike {
                             return confirmedActions.contains(index) ? action : nil
@@ -757,11 +784,22 @@ struct MedicationVerificationView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(hasUnconfirmedStopActions())
+                
+                Button("✏️ Edit Medications") {
+                    onEdit(editableMedications)
+                }
+                .buttonStyle(.bordered)
             }
         }
         .padding()
         .background(Color(.systemYellow).opacity(0.1))
         .cornerRadius(12)
+        .onChange(of: medicationActions.count) { _, _ in
+            confirmedActions = []
+        }
+        .onAppear {
+            editableMedications = medications
+        }
     }
     
     private func hasUnconfirmedStopActions() -> Bool {
@@ -774,46 +812,81 @@ struct MedicationVerificationView: View {
 struct MedicationActionRow: View {
     let action: MedicationAction
     let isConfirmed: Bool
-    let onConfirm: () -> Void
-    let onCancel: () -> Void
+    let onConfirmDiscontinue: () -> Void
+    /// Web `cancel-stop-btn`: removes the action from the visit (parent updates the list).
+    var onRemoveAction: (() -> Void)? = nil
     
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(actionIcon)
-                    Text("\(action.action.displayName): \(action.medicationName)")
-                        .fontWeight(.medium)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(actionIcon)
+                        Text("\(verbLabel): \(action.medicationName)")
+                            .fontWeight(.semibold)
+                        if action.action.isStopLike {
+                            Text("(Confirmation Required)")
+                                .font(.caption)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    
+                    if let reason = action.reason, !reason.isEmpty {
+                        Text("Reason: \(reason)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    if let newInstr = action.newInstructions, !newInstr.isEmpty {
+                        Text("New Instructions: \(newInstr)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
-                
-                if let reason = action.reason {
-                    Text("Reason: \(reason)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+                Spacer(minLength: 0)
             }
-            
-            Spacer()
             
             if action.action.isStopLike {
                 if isConfirmed {
-                    Text("✅ Confirmed")
+                    Text("✅ Confirmed for discontinuation")
                         .font(.caption)
-                        .foregroundColor(.green)
+                        .fontWeight(.semibold)
+                        .foregroundColor(Color(red: 0.098, green: 0.53, blue: 0.33))
                 } else {
-                    HStack {
-                        Button("Confirm") { onConfirm() }
+                    HStack(spacing: 8) {
+                        Button("✅ Confirm Discontinue") { onConfirmDiscontinue() }
                             .buttonStyle(.borderedProminent)
+                            .tint(.red)
                             .controlSize(.small)
-                        
-                        Button("Cancel") { onCancel() }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
+                        if onRemoveAction != nil {
+                            Button("❌ Cancel") { onRemoveAction?() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
                     }
                 }
             }
         }
-        .padding(.vertical, 4)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(action.action.isStopLike ? Color.yellow.opacity(0.2) : Color.blue.opacity(0.08))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(
+                    action.action.isStopLike ? Color.orange.opacity(0.6) : Color.blue.opacity(0.35),
+                    lineWidth: 1
+                )
+        )
+        .padding(.vertical, 2)
+    }
+    
+    private var verbLabel: String {
+        switch action.action {
+        case .stop, .discontinue: return "Discontinue"
+        case .start: return "Start"
+        case .modify: return "Modify"
+        case .continued: return "Continue"
+        }
     }
     
     private var actionIcon: String {
@@ -894,6 +967,8 @@ struct MedicationRow: View {
 
 struct NewVisitSummaryView: View {
     let summary: VisitSummary
+    /// Web hides `#summaryActions` while `#medicationVerification` is visible.
+    var showPrimaryActions: Bool = true
     let onSave: () -> Void
     let onDiscard: () -> Void
     
@@ -901,15 +976,15 @@ struct NewVisitSummaryView: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Visit Summary")
+            Text("Step 3: Review AI Summary")
                 .font(.headline)
                 .fontWeight(.semibold)
             
             VStack(alignment: .leading, spacing: 12) {
-                SummarySection(title: "Summary", content: summary.summary)
-                SummarySection(title: "Key Points", content: summary.tldr)
-                SummarySection(title: "Specialty", content: summary.specialty)
-                SummarySection(title: "Date", content: summary.date)
+                SummarySection(title: "Full Summary", content: summary.summary)
+                SummarySection(title: "TL;DR (Short Summary)", content: summary.tldr)
+                SummarySection(title: "Medical Specialty", content: summary.specialty)
+                SummarySection(title: "Date of Visit", content: summary.date)
                 
                 if !summary.medications.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
@@ -940,19 +1015,21 @@ struct NewVisitSummaryView: View {
                 }
             }
             
-            VStack(spacing: 12) {
-                Button("Confirm & save visit") {
-                    onSave()
+            if showPrimaryActions {
+                VStack(spacing: 12) {
+                    Button("✅ Confirm & Save Visit") {
+                        onSave()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .frame(maxWidth: .infinity)
+                    
+                    Button("🗑️ Discard") {
+                        showDiscardConfirm = true
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                
-                Button("Delete recording") {
-                    showDiscardConfirm = true
-                }
-                .buttonStyle(.bordered)
-                .tint(.red)
-                .frame(maxWidth: .infinity)
             }
         }
         .padding()
@@ -963,10 +1040,10 @@ struct NewVisitSummaryView: View {
             isPresented: $showDiscardConfirm,
             titleVisibility: .visible
         ) {
-            Button("Delete", role: .destructive) { onDiscard() }
+            Button("Discard", role: .destructive) { onDiscard() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This visit will not be saved. You can record again.")
+            Text("It won't be saved.")
         }
     }
 }

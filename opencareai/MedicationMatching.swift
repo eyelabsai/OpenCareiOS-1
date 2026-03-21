@@ -1,4 +1,4 @@
-// MedicationMatching.swift — ports web `new-visit.html` name matching for stop/modify resolution.
+// MedicationMatching.swift — ports name matching from `/Users/gurpalvirdi/OpenCare/public/new-visit.html` (stop/modify resolution).
 
 import Foundation
 
@@ -85,5 +85,47 @@ enum MedicationNameMatcher {
             }
         }
         return nil
+    }
+    
+    /// Mirrors web `displayMedicationVerification` preprocessing: meds covered by an AI stop/discontinue action are omitted from the table; stop phrases in `fullInstructions` become synthetic stop actions.
+    static func medicationsAndActionsForNewVisitVerification(
+        medications: [Medication],
+        medicationActions: [MedicationAction]
+    ) -> ([Medication], [MedicationAction]) {
+        let stopPhrases = [
+            "stop using", "discontinue", "stop taking", "cease", "end", "no longer need",
+            "can stop", "should stop", "stop", "discontinue the use of"
+        ]
+        var derivedStops: [MedicationAction] = []
+        var filteredMeds: [Medication] = []
+        for med in medications {
+            let name = med.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if name.isEmpty { continue }
+            let hasAIStop = medicationActions.contains { act in
+                act.action.isStopLike
+                    && !act.medicationName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && isMedMatch(name, act.medicationName)
+            }
+            if hasAIStop {
+                continue
+            }
+            let instructions = (med.fullInstructions ?? "").lowercased()
+            if stopPhrases.contains(where: { instructions.contains($0) }) {
+                derivedStops.append(MedicationAction(
+                    id: nil,
+                    visitId: nil,
+                    medicationId: nil,
+                    action: .stop,
+                    medicationName: med.name,
+                    genericReference: nil,
+                    reason: med.fullInstructions ?? "Discontinued per doctor instructions",
+                    newInstructions: nil,
+                    createdAt: nil
+                ))
+            } else {
+                filteredMeds.append(med)
+            }
+        }
+        return (filteredMeds, medicationActions + derivedStops)
     }
 }

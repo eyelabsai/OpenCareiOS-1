@@ -99,7 +99,7 @@ struct Visit: Codable, Identifiable {
     var setting: VisitSetting?
     var isDischarge: Bool?
     var startedAt: Date?
-    /// Raw transcript text (matches web `new-visit` save payload).
+    /// Raw transcript text (matches web `new-visit.html` save payload — `/Users/gurpalvirdi/OpenCare/public/new-visit.html`).
     var transcript: String?
 }
 

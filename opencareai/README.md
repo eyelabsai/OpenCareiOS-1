@@ -90,14 +90,15 @@ The app follows the MVVM (Model-View-ViewModel) architecture pattern and is buil
 3. Ensure the web app server is running and accessible
 
 ### 3. Web App Server
-1. Navigate to the `OpenCare_WebApp` directory
-2. Install dependencies: `npm install`
-3. Set up environment variables:
+1. Open the web app at `/Users/gurpalvirdi/OpenCare` (canonical repo for API + AI flows aligned with this iOS client)
+2. For **new visit** behavior parity with iOS, compare against `/Users/gurpalvirdi/OpenCare/public/new-visit.html`
+3. Install dependencies: `npm install`
+4. Set up environment variables:
    ```
    OPENAI_API_KEY=your_openai_api_key
    ```
-4. Start the server: `npm start`
-5. Update the API base URL in `Config.swift` to match your server
+5. Start the server: `npm start`
+6. Update the API base URL in `Config.swift` to match your server
 
 ### 4. Xcode Project Setup
 1. Open `opencareai.xcodeproj` in Xcode
@@ -115,7 +116,7 @@ The app communicates with the web app server for:
 ### API Endpoints
 - `POST /api/transcribe` - Transcribe audio recordings
 - `POST /api/summarise` - Summarize visit transcripts
-- `POST /api/assistant` - Health assistant queries
+- `POST /api/health-assistant` - Health assistant queries
 - `GET /api/test` - Test server connection
 
 ## Firebase Collections
@@ -232,4 +233,4 @@ For support and questions:
 
 ---
 
-**Note**: This iOS app is designed to work in conjunction with the OpenCare Web App. Ensure both applications are properly configured and the web app server is running for full functionality. 
+**Note**: This iOS app is designed to work with the OpenCare web project at `/Users/gurpalvirdi/OpenCare`. For **new visit** flows, keep iOS aligned with `/Users/gurpalvirdi/OpenCare/public/new-visit.html`; point `APIService` / `Config` at your deployed URL or local dev server. 
