@@ -259,6 +259,69 @@ class MedicationViewModel: ObservableObject {
         }
     }
     
+    /// Mirrors web `findActiveMedicationMatch` (active medications only).
+    @MainActor
+    func findActiveMedicationMatch(medicationName: String?, genericReference: String?) async -> Medication? {
+        guard let userId = Auth.auth().currentUser?.uid else { return nil }
+        do {
+            let active = try await firebaseService.getUserMedications(userId: userId)
+            return MedicationNameMatcher.findActiveMedicationMatch(
+                medicationName: medicationName,
+                genericReference: genericReference,
+                activeMedications: active
+            )
+        } catch {
+            return nil
+        }
+    }
+    
+    /// Web `processMedicationActions`: only `stop` / `discontinue` / `modify` require resolving an existing med; unmatched → warnings.
+    @MainActor
+    func evaluateMedicationActionStopModifyWarnings(actions: [MedicationAction]) async -> [String] {
+        var warnings: [String] = []
+        for action in actions {
+            if action.action == .modify || action.action.isStopLike {
+                let match = await findActiveMedicationMatch(
+                    medicationName: action.medicationName,
+                    genericReference: action.genericReference
+                )
+                if match == nil {
+                    let label: String = {
+                        let n = action.medicationName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !n.isEmpty { return n }
+                        if let g = action.genericReference?.trimmingCharacters(in: .whitespacesAndNewlines), !g.isEmpty { return g }
+                        return "medication"
+                    }()
+                    if action.action == .modify {
+                        warnings.append("Could not find an active medication to modify for: \(label)")
+                    } else {
+                        warnings.append("Could not find an active medication to discontinue for: \(label)")
+                    }
+                }
+            }
+        }
+        return warnings
+    }
+    
+    /// After visit document exists: apply stop/modify to user medication list (matches web post-`createVisit` loop).
+    @MainActor
+    func applyStopAndModifyFromVisitActions(_ actions: [MedicationAction]) async {
+        for action in actions {
+            if action.action.isStopLike {
+                if let med = await findActiveMedicationMatch(medicationName: action.medicationName, genericReference: action.genericReference) {
+                    await discontinueMedication(med, reason: action.reason ?? "Discontinued per doctor instructions")
+                }
+            } else if action.action == .modify {
+                if let med = await findActiveMedicationMatch(medicationName: action.medicationName, genericReference: action.genericReference) {
+                    var updated = med
+                    updated.fullInstructions = action.newInstructions ?? updated.fullInstructions
+                    await updateMedication(updated)
+                }
+            }
+        }
+        await loadMedicationsAsync()
+    }
+    
     // MARK: - Process Medication Actions from Visit
     @MainActor
     func processMedicationActions(_ actions: [MedicationAction], visitId: String) async {
@@ -310,7 +373,7 @@ class MedicationViewModel: ObservableObject {
                         await createMedication(newMedication)
                     }
                     
-                case .stop:
+                case .stop, .discontinue:
                     // Discontinue medication
                     if let existingMed = await getMedicationByName(action.medicationName) {
                         await discontinueMedication(existingMed, reason: action.reason)

@@ -178,6 +178,22 @@ class UserViewModel: ObservableObject {
         await updateUserProfile()
     }
     
+    /// Merges AI-detected chronic conditions into the user profile (matches web `updateUserChronicConditions` + modal).
+    func mergeChronicConditionsFromVisit(_ additions: [String]) async {
+        guard !additions.isEmpty else { return }
+        var merged = user.chronicConditions
+        for add in additions {
+            let trimmed = add.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let exists = merged.contains { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+            if !exists {
+                merged.append(trimmed)
+            }
+        }
+        user.chronicConditions = merged
+        await updateUserProfile()
+    }
+    
     func addAllergy(_ allergy: String) async {
         let trimmedAllergy = allergy.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedAllergy.isEmpty else { return }

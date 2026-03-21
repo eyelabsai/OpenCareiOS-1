@@ -99,6 +99,8 @@ struct Visit: Codable, Identifiable {
     var setting: VisitSetting?
     var isDischarge: Bool?
     var startedAt: Date?
+    /// Raw transcript text (matches web `new-visit` save payload).
+    var transcript: String?
 }
 
 // MARK: - Visit Setting (matching web app)
@@ -136,6 +138,8 @@ struct Medication: Codable, Identifiable {
     var context: MedicationContext?
     var lifecycle: MedicationLifecycle?
     var startDate: Date?
+    /// ISO date string (YYYY-MM-DD) when the medication was tied to a visit — matches web `visitDate`.
+    var visitDate: String?
 }
 
 // MARK: - Medication Context & Lifecycle (matching web app)
@@ -250,13 +254,15 @@ struct MedicationAction: Codable, Identifiable {
 enum MedicationActionType: String, Codable, CaseIterable {
     case start = "start"
     case stop = "stop"
+    /// Same handling as `stop` in the web app (`processMedicationActions` accepts `discontinue`).
+    case discontinue = "discontinue"
     case continued = "continue"
     case modify = "modify"
     
     var displayName: String {
         switch self {
         case .start: return "Started"
-        case .stop: return "Stopped"
+        case .stop, .discontinue: return "Stopped"
         case .continued: return "Continued"
         case .modify: return "Modified"
         }
@@ -265,7 +271,7 @@ enum MedicationActionType: String, Codable, CaseIterable {
     var color: String {
         switch self {
         case .start: return "green"
-        case .stop: return "red"
+        case .stop, .discontinue: return "red"
         case .continued: return "blue"
         case .modify: return "orange"
         }
@@ -274,10 +280,15 @@ enum MedicationActionType: String, Codable, CaseIterable {
     var systemIcon: String {
         switch self {
         case .start: return "plus.circle.fill"
-        case .stop: return "minus.circle.fill"
+        case .stop, .discontinue: return "minus.circle.fill"
         case .continued: return "arrow.clockwise.circle.fill"
         case .modify: return "pencil.circle.fill"
         }
+    }
+    
+    /// Web groups `stop` and `discontinue` for discontinue flows.
+    var isStopLike: Bool {
+        self == .stop || self == .discontinue
     }
 }
 
@@ -288,6 +299,37 @@ struct HealthAssistantMessage: Codable, Identifiable {
     var message: String
     var response: String
     var timestamp: Date?
+}
+
+// MARK: - Visit date parsing (matches web `new-visit` / summarise `date` strings)
+enum VisitSummaryDate {
+    static func resolvedDate(from summaryDate: String) -> Date {
+        let trimmed = summaryDate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower == "today" || trimmed.uppercased() == "TODAY" { return Date() }
+        if lower == "not specified" || trimmed.isEmpty { return Date() }
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+        if let d = iso.date(from: trimmed) { return d }
+        let isoDateOnly = DateFormatter()
+        isoDateOnly.calendar = Calendar(identifier: .gregorian)
+        isoDateOnly.locale = Locale(identifier: "en_US_POSIX")
+        isoDateOnly.timeZone = TimeZone.current
+        isoDateOnly.dateFormat = "yyyy-MM-dd"
+        if let d = isoDateOnly.date(from: trimmed) { return d }
+        let med = DateFormatter()
+        med.dateStyle = .medium
+        return med.date(from: trimmed) ?? Date()
+    }
+    
+    static func isoDateString(from date: Date) -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: date)
+    }
 }
 
 // MARK: - API Response Models
@@ -319,11 +361,12 @@ struct VisitSummary: Codable {
     var specialty: String
     var date: String
     var medications: [Medication]
-    var medicationActions: [String] // Changed from [MedicationAction] to [String] to match API response
+    var medicationActions: [MedicationAction]
     var chronicConditions: [String]
     // Enhanced fields matching web app
     var setting: String?
     var isDischarge: Bool?
+    var transcript: String?
 }
 
 struct HealthAssistantResponse: Codable {

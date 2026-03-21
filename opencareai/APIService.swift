@@ -343,14 +343,15 @@ class APIService: ObservableObject {
         
         let visitSummary = VisitSummary(
             summary: summary,
-            tldr: summary,
+            tldr: summarizationResponse.tldr ?? summary,
             specialty: summarizationResponse.specialty ?? "General",
             date: summarizationResponse.date ?? "TODAY",
-            medications: summarizationResponse.medications ?? [],
-            medicationActions: actions.map { $0.action.rawValue },
+            medications: finalMedications,
+            medicationActions: actions,
             chronicConditions: summarizationResponse.chronicConditions ?? [],
             setting: summarizationResponse.setting ?? "clinic",
-            isDischarge: summarizationResponse.isDischarge ?? false
+            isDischarge: summarizationResponse.isDischarge ?? false,
+            transcript: nil
         )
         return (visitSummary, finalMedications, actions)
     }
@@ -436,24 +437,8 @@ class APIService: ObservableObject {
         }
         
         // Step 2: Summarize transcript
-        let (summarizationResponse, medications, actions) = try await summarizeTranscriptWithVerification(transcript)
-        
-        // Step 3: Convert to VisitSummary
-        // Convert MedicationAction objects to strings for VisitSummary
-        let medicationActionStrings = actions.map { $0.action.rawValue }
-        
-        let visitSummary = VisitSummary(
-            summary: summarizationResponse.summary ?? "",
-            tldr: summarizationResponse.tldr ?? "",
-            specialty: summarizationResponse.specialty ?? "General",
-            date: summarizationResponse.date ?? "TODAY",
-            medications: medications,
-            medicationActions: medicationActionStrings,
-            chronicConditions: summarizationResponse.chronicConditions ?? [],
-            setting: summarizationResponse.setting ?? "clinic",
-            isDischarge: summarizationResponse.isDischarge ?? false
-        )
-        
+        var visitSummary = try await summarizeTranscriptWithVerification(transcript).0
+        visitSummary.transcript = transcript
         return visitSummary
     }
 }

@@ -13,6 +13,111 @@ class OpenCareFirebaseService: ObservableObject {
     
     private init() {}
     
+    /// Web `setUserProfile` stores comma-separated string; iOS uses `[String]`. Accept both when reading.
+    private static func parseChronicConditionsField(_ value: Any?) -> [String] {
+        if let arr = value as? [String] { return arr }
+        if let str = value as? String, !str.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return str.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        }
+        return []
+    }
+    
+    // MARK: - Medication / action decoding (shared)
+    private func decodeMedication(_ data: [String: Any], documentId: String?) -> Medication {
+        let id = documentId ?? (data["id"] as? String)
+        var medication = Medication(
+            id: id,
+            userId: data["userId"] as? String,
+            name: data["name"] as? String ?? "",
+            dosage: data["dosage"] as? String ?? "",
+            frequency: data["frequency"] as? String ?? "",
+            timing: data["timing"] as? String,
+            route: data["route"] as? String,
+            laterality: data["laterality"] as? String,
+            duration: data["duration"] as? String,
+            instructions: data["instructions"] as? String,
+            fullInstructions: data["fullInstructions"] as? String,
+            isActive: data["isActive"] as? Bool ?? true,
+            discontinuationReason: data["discontinuationReason"] as? String,
+            createdAt: nil,
+            updatedAt: nil,
+            discontinuedDate: nil,
+            context: nil,
+            lifecycle: nil,
+            startDate: nil,
+            visitDate: data["visitDate"] as? String
+        )
+        if let contextString = data["context"] as? String {
+            medication.context = MedicationContext(rawValue: contextString)
+        }
+        if let lifecycleString = data["lifecycle"] as? String {
+            medication.lifecycle = MedicationLifecycle(rawValue: lifecycleString)
+        }
+        if let createdAtTimestamp = data["createdAt"] as? Timestamp {
+            medication.createdAt = createdAtTimestamp.dateValue()
+        }
+        if let updatedAtTimestamp = data["updatedAt"] as? Timestamp {
+            medication.updatedAt = updatedAtTimestamp.dateValue()
+        }
+        if let discontinuedDateTimestamp = data["discontinuedDate"] as? Timestamp {
+            medication.discontinuedDate = discontinuedDateTimestamp.dateValue()
+        }
+        if let startDate = data["startDate"] as? Timestamp {
+            medication.startDate = startDate.dateValue()
+        }
+        return medication
+    }
+    
+    private func decodeMedicationAction(_ actionData: [String: Any], documentId: String) -> MedicationAction? {
+        guard let actionString = actionData["action"] as? String,
+              let actionType = MedicationActionType(rawValue: actionString) else {
+            return nil
+        }
+        let medicationName = (actionData["medicationName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var action = MedicationAction(
+            id: actionData["id"] as? String,
+            visitId: actionData["visitId"] as? String,
+            medicationId: actionData["medicationId"] as? String,
+            action: actionType,
+            medicationName: medicationName,
+            genericReference: actionData["genericReference"] as? String,
+            reason: actionData["reason"] as? String,
+            newInstructions: actionData["newInstructions"] as? String,
+            createdAt: nil
+        )
+        if action.id == nil { action.id = documentId }
+        if let createdAtTimestamp = actionData["createdAt"] as? Timestamp {
+            action.createdAt = createdAtTimestamp.dateValue()
+        }
+        return action
+    }
+    
+    /// Medication actions stored nested on a visit document (no Firestore sub-id).
+    private func decodeMedicationActionEmbedded(_ actionData: [String: Any]) -> MedicationAction? {
+        guard let actionString = actionData["action"] as? String,
+              let actionType = MedicationActionType(rawValue: actionString) else {
+            return nil
+        }
+        let medicationName = (actionData["medicationName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var action = MedicationAction(
+            id: actionData["id"] as? String,
+            visitId: actionData["visitId"] as? String,
+            medicationId: actionData["medicationId"] as? String,
+            action: actionType,
+            medicationName: medicationName,
+            genericReference: actionData["genericReference"] as? String,
+            reason: actionData["reason"] as? String,
+            newInstructions: actionData["newInstructions"] as? String,
+            createdAt: nil
+        )
+        if let createdAtTimestamp = actionData["createdAt"] as? Timestamp {
+            action.createdAt = createdAtTimestamp.dateValue()
+        } else if let createdAtTimestamp = actionData["createdAt"] as? Date {
+            action.createdAt = createdAtTimestamp
+        }
+        return action
+    }
+    
     // MARK: - Authentication
     func signIn(email: String, password: String) async throws -> User {
         let result = try await auth.signIn(withEmail: email, password: password)
@@ -122,7 +227,7 @@ class OpenCareFirebaseService: ObservableObject {
         user.insuranceProvider = data["insuranceProvider"] as? String ?? ""
         user.insuranceMemberId = data["insuranceMemberId"] as? String ?? ""
         user.allergies = data["allergies"] as? [String] ?? []
-        user.chronicConditions = data["chronicConditions"] as? [String] ?? []
+        user.chronicConditions = Self.parseChronicConditionsField(data["chronicConditions"])
         user.heightFeet = String(data["heightFeet"] as? Int ?? 0)
         user.heightInches = String(data["heightInches"] as? Int ?? 0)
         user.weight = String(data["weight"] as? Double ?? 0.0)
@@ -196,8 +301,7 @@ class OpenCareFirebaseService: ObservableObject {
     
     // MARK: - Visit Management
     func createVisit(_ visit: Visit, userId: String) async throws {
-        var newVisit = visit
-        newVisit.id = UUID().uuidString
+        let newVisit = visit
         
         // Convert MedicationAction objects to Firestore-compatible dictionaries
         let medicationActionsDict = (newVisit.medicationActions ?? []).map { action in
@@ -212,7 +316,7 @@ class OpenCareFirebaseService: ObservableObject {
                 "newInstructions": action.newInstructions as Any
             ]
             if let createdAt = action.createdAt {
-                dict["createdAt"] = createdAt
+                dict["createdAt"] = Timestamp(date: createdAt)
             }
             return dict
         }
@@ -237,32 +341,38 @@ class OpenCareFirebaseService: ObservableObject {
                 "lifecycle": med.lifecycle?.rawValue as Any
             ]
             if let createdAt = med.createdAt {
-                dict["createdAt"] = createdAt
+                dict["createdAt"] = Timestamp(date: createdAt)
             }
             if let updatedAt = med.updatedAt {
-                dict["updatedAt"] = updatedAt
+                dict["updatedAt"] = Timestamp(date: updatedAt)
             }
             if let discontinuedDate = med.discontinuedDate {
-                dict["discontinuedDate"] = discontinuedDate
+                dict["discontinuedDate"] = Timestamp(date: discontinuedDate)
             }
             if let startDate = med.startDate {
-                dict["startDate"] = startDate
+                dict["startDate"] = Timestamp(date: startDate)
+            }
+            if let vd = med.visitDate {
+                dict["visitDate"] = vd
             }
             return dict
         }
-        // Prepare the visit dictionary
+        // Prepare the visit dictionary (document ID is Firestore-generated; matches web `createVisit`.)
         var visitDict: [String: Any] = [
-            "id": newVisit.id as Any,
             "userId": userId,
-            "specialty": newVisit.specialty,
-            "summary": newVisit.summary,
-            "tldr": newVisit.tldr,
+            "specialty": newVisit.specialty as Any,
+            "summary": newVisit.summary as Any,
+            "tldr": newVisit.tldr as Any,
             "medications": medicationsDict,
             "medicationActions": medicationActionsDict,
-            "date": newVisit.date ?? Date(),
-            "createdAt": newVisit.createdAt ?? Date(),
-            "updatedAt": newVisit.updatedAt ?? Date()
+            "date": Timestamp(date: newVisit.date ?? Date()),
+            "createdAt": Timestamp(date: newVisit.createdAt ?? Date()),
+            "updatedAt": Timestamp(date: newVisit.updatedAt ?? Date())
         ]
+        
+        if let transcript = newVisit.transcript, !transcript.isEmpty {
+            visitDict["transcript"] = transcript
+        }
         
         // Add enhanced fields matching web app
         if let setting = newVisit.setting {
@@ -272,17 +382,25 @@ class OpenCareFirebaseService: ObservableObject {
             visitDict["isDischarge"] = isDischarge
         }
         if let startedAt = newVisit.startedAt {
-            visitDict["startedAt"] = startedAt
+            visitDict["startedAt"] = Timestamp(date: startedAt)
         }
         // Save to Firestore
         _ = try await db.collection("visits").addDocument(data: visitDict)
     }
     
     func getUserVisits(userId: String) async throws -> [Visit] {
-        let snapshot = try await db.collection("visits")
-            .whereField("userId", isEqualTo: userId)
-            .order(by: "date", descending: true)
-            .getDocuments()
+        let snapshot: QuerySnapshot
+        do {
+            snapshot = try await db.collection("visits")
+                .whereField("userId", isEqualTo: userId)
+                .order(by: "createdAt", descending: true)
+                .getDocuments()
+        } catch {
+            snapshot = try await db.collection("visits")
+                .whereField("userId", isEqualTo: userId)
+                .order(by: "date", descending: true)
+                .getDocuments()
+        }
         
         return snapshot.documents.compactMap { document in
             let data = document.data()
@@ -292,81 +410,23 @@ class OpenCareFirebaseService: ObservableObject {
             visit.specialty = data["specialty"] as? String ?? ""
             visit.summary = data["summary"] as? String ?? ""
             visit.tldr = data["tldr"] as? String ?? ""
-            // Fix: Decode medications from array of dictionaries
+            visit.transcript = data["transcript"] as? String
+            
             if let medicationsData = data["medications"] as? [[String: Any]] {
-                let medications = medicationsData.compactMap { medData -> Medication? in
-                    var medication = Medication(
-                        id: medData["id"] as? String,
-                        userId: medData["userId"] as? String,
-                        name: medData["name"] as? String ?? "",
-                        dosage: medData["dosage"] as? String ?? "",
-                        frequency: medData["frequency"] as? String ?? "",
-                        timing: medData["timing"] as? String,
-                        route: medData["route"] as? String,
-                        laterality: medData["laterality"] as? String,
-                        duration: medData["duration"] as? String,
-                        instructions: medData["instructions"] as? String,
-                        fullInstructions: medData["fullInstructions"] as? String,
-                        isActive: medData["isActive"] as? Bool,
-                        discontinuationReason: medData["discontinuationReason"] as? String,
-                        createdAt: (medData["createdAt"] as? Timestamp)?.dateValue(),
-                        updatedAt: (medData["updatedAt"] as? Timestamp)?.dateValue(),
-                        discontinuedDate: (medData["discontinuedDate"] as? Timestamp)?.dateValue()
-                    )
-                    
-                    // Enhanced fields matching web app
-                    if let contextString = medData["context"] as? String {
-                        medication.context = MedicationContext(rawValue: contextString)
-                    }
-                    if let lifecycleString = medData["lifecycle"] as? String {
-                        medication.lifecycle = MedicationLifecycle(rawValue: lifecycleString)
-                    }
-                    if let startDate = medData["startDate"] as? Timestamp {
-                        medication.startDate = startDate.dateValue()
-                    }
-                    
-                    return medication
-                }
-                visit.medications = medications
+                visit.medications = medicationsData.map { decodeMedication($0, documentId: nil) }
             } else {
                 visit.medications = []
             }
             
-            // Reconstruct MedicationAction objects from Firestore data
             let medicationActionsData = data["medicationActions"] as? [[String: Any]] ?? []
-            let medicationActions = medicationActionsData.compactMap { actionData -> MedicationAction? in
-                guard let actionString = actionData["action"] as? String,
-                      let actionType = MedicationActionType(rawValue: actionString),
-                      let medicationName = actionData["medicationName"] as? String else {
-                    return nil
-                }
-                
-                var action = MedicationAction(
-                    id: actionData["id"] as? String,
-                    visitId: actionData["visitId"] as? String,
-                    medicationId: actionData["medicationId"] as? String,
-                    action: actionType,
-                    medicationName: medicationName,
-                    genericReference: actionData["genericReference"] as? String,
-                    reason: actionData["reason"] as? String,
-                    newInstructions: actionData["newInstructions"] as? String,
-                    createdAt: nil
-                )
-                
-                // Convert Timestamp to Date
-                if let createdAtTimestamp = actionData["createdAt"] as? Timestamp {
-                    action.createdAt = createdAtTimestamp.dateValue()
-                }
-                
-                return action
-            }
-            visit.medicationActions = medicationActions
+            visit.medicationActions = medicationActionsData.compactMap { decodeMedicationActionEmbedded($0) }
             
             visit.chronicConditions = data["chronicConditions"] as? [String] ?? []
             
-            // Convert Timestamps to Dates
             if let dateTimestamp = data["date"] as? Timestamp {
                 visit.date = dateTimestamp.dateValue()
+            } else if let dateString = data["date"] as? String {
+                visit.date = VisitSummaryDate.resolvedDate(from: dateString)
             }
             if let createdAtTimestamp = data["createdAt"] as? Timestamp {
                 visit.createdAt = createdAtTimestamp.dateValue()
@@ -375,13 +435,14 @@ class OpenCareFirebaseService: ObservableObject {
                 visit.updatedAt = updatedAtTimestamp.dateValue()
             }
             
-            // Enhanced fields matching web app
             if let settingString = data["setting"] as? String {
                 visit.setting = VisitSetting(rawValue: settingString)
             }
             visit.isDischarge = data["isDischarge"] as? Bool
             if let startedAtTimestamp = data["startedAt"] as? Timestamp {
                 visit.startedAt = startedAtTimestamp.dateValue()
+            } else if let startedAtString = data["startedAt"] as? String {
+                visit.startedAt = ISO8601DateFormatter().date(from: startedAtString)
             }
             
             return visit
@@ -397,68 +458,23 @@ class OpenCareFirebaseService: ObservableObject {
         visit.specialty = data["specialty"] as? String ?? ""
         visit.summary = data["summary"] as? String ?? ""
         visit.tldr = data["tldr"] as? String ?? ""
-        // Fix: Decode medications from array of dictionaries
+        visit.transcript = data["transcript"] as? String
+        
         if let medicationsData = data["medications"] as? [[String: Any]] {
-            let medications = medicationsData.compactMap { medData -> Medication? in
-                Medication(
-                    id: medData["id"] as? String,
-                    userId: medData["userId"] as? String,
-                    name: medData["name"] as? String ?? "",
-                    dosage: medData["dosage"] as? String ?? "",
-                    frequency: medData["frequency"] as? String ?? "",
-                    timing: medData["timing"] as? String,
-                    route: medData["route"] as? String,
-                    laterality: medData["laterality"] as? String,
-                    duration: medData["duration"] as? String,
-                    instructions: medData["instructions"] as? String,
-                    fullInstructions: medData["fullInstructions"] as? String,
-                    isActive: medData["isActive"] as? Bool,
-                    discontinuationReason: medData["discontinuationReason"] as? String,
-                    createdAt: (medData["createdAt"] as? Timestamp)?.dateValue(),
-                    updatedAt: (medData["updatedAt"] as? Timestamp)?.dateValue(),
-                    discontinuedDate: (medData["discontinuedDate"] as? Timestamp)?.dateValue()
-                )
-            }
-            visit.medications = medications
+            visit.medications = medicationsData.map { decodeMedication($0, documentId: nil) }
         } else {
             visit.medications = []
         }
         
-        // Reconstruct MedicationAction objects from Firestore data
         let medicationActionsData = data["medicationActions"] as? [[String: Any]] ?? []
-        let medicationActions = medicationActionsData.compactMap { actionData -> MedicationAction? in
-            guard let actionString = actionData["action"] as? String,
-                  let actionType = MedicationActionType(rawValue: actionString),
-                  let medicationName = actionData["medicationName"] as? String else {
-                return nil
-            }
-            
-            var action = MedicationAction(
-                id: actionData["id"] as? String,
-                visitId: actionData["visitId"] as? String,
-                medicationId: actionData["medicationId"] as? String,
-                action: actionType,
-                medicationName: medicationName,
-                genericReference: actionData["genericReference"] as? String,
-                reason: actionData["reason"] as? String,
-                newInstructions: actionData["newInstructions"] as? String,
-                createdAt: nil
-            )
-            
-            // Convert Timestamp to Date
-            if let createdAtTimestamp = actionData["createdAt"] as? Timestamp {
-                action.createdAt = createdAtTimestamp.dateValue()
-            }
-            
-            return action
-        }
-        visit.medicationActions = medicationActions
+        visit.medicationActions = medicationActionsData.compactMap { decodeMedicationActionEmbedded($0) }
         
         visit.chronicConditions = data["chronicConditions"] as? [String] ?? []
         
-        // Convert Timestamps to Dates
         if let dateTimestamp = data["date"] as? Timestamp {
             visit.date = dateTimestamp.dateValue()
+        } else if let dateString = data["date"] as? String {
+            visit.date = VisitSummaryDate.resolvedDate(from: dateString)
         }
         if let createdAtTimestamp = data["createdAt"] as? Timestamp {
             visit.createdAt = createdAtTimestamp.dateValue()
@@ -467,13 +483,14 @@ class OpenCareFirebaseService: ObservableObject {
             visit.updatedAt = updatedAtTimestamp.dateValue()
         }
         
-        // Enhanced fields matching web app
         if let settingString = data["setting"] as? String {
             visit.setting = VisitSetting(rawValue: settingString)
         }
         visit.isDischarge = data["isDischarge"] as? Bool
         if let startedAtTimestamp = data["startedAt"] as? Timestamp {
             visit.startedAt = startedAtTimestamp.dateValue()
+        } else if let startedAtString = data["startedAt"] as? String {
+            visit.startedAt = ISO8601DateFormatter().date(from: startedAtString)
         }
         
         return visit
@@ -492,13 +509,11 @@ class OpenCareFirebaseService: ObservableObject {
     // MARK: - Medication Management
     func createMedication(_ medication: Medication, userId: String) async throws {
         var newMedication = medication
-        newMedication.id = UUID().uuidString
         newMedication.isActive = true
         newMedication.createdAt = Date()
         newMedication.updatedAt = Date()
         
         var dict: [String: Any] = [
-            "id": newMedication.id ?? "",
             "userId": userId,
             "name": newMedication.name.lowercased(),
             "dosage": newMedication.dosage,
@@ -524,6 +539,9 @@ class OpenCareFirebaseService: ObservableObject {
         if let startDate = newMedication.startDate {
             dict["startDate"] = Timestamp(date: startDate)
         }
+        if let visitDate = newMedication.visitDate, !visitDate.isEmpty {
+            dict["visitDate"] = visitDate
+        }
         
         try await db.collection("medications").addDocument(data: dict)
     }
@@ -535,41 +553,7 @@ class OpenCareFirebaseService: ObservableObject {
             .order(by: "createdAt", descending: true)
             .getDocuments()
         
-        return snapshot.documents.compactMap { document in
-            let data = document.data()
-            
-            var medication = Medication(
-                id: document.documentID,
-                userId: data["userId"] as? String,
-                name: data["name"] as? String ?? "",
-                dosage: data["dosage"] as? String ?? "",
-                frequency: data["frequency"] as? String ?? "",
-                timing: data["timing"] as? String,
-                route: data["route"] as? String,
-                laterality: data["laterality"] as? String,
-                duration: data["duration"] as? String,
-                instructions: data["instructions"] as? String,
-                fullInstructions: data["fullInstructions"] as? String,
-                isActive: data["isActive"] as? Bool ?? true,
-                discontinuationReason: data["discontinuationReason"] as? String,
-                createdAt: nil,
-                updatedAt: nil,
-                discontinuedDate: nil
-            )
-            
-            // Convert Timestamps to Dates
-            if let createdAtTimestamp = data["createdAt"] as? Timestamp {
-                medication.createdAt = createdAtTimestamp.dateValue()
-            }
-            if let updatedAtTimestamp = data["updatedAt"] as? Timestamp {
-                medication.updatedAt = updatedAtTimestamp.dateValue()
-            }
-            if let discontinuedDateTimestamp = data["discontinuedDate"] as? Timestamp {
-                medication.discontinuedDate = discontinuedDateTimestamp.dateValue()
-            }
-            
-            return medication
-        }
+        return snapshot.documents.map { decodeMedication($0.data(), documentId: $0.documentID) }
     }
     
     func getAllUserMedications(userId: String) async throws -> [Medication] {
@@ -578,41 +562,7 @@ class OpenCareFirebaseService: ObservableObject {
             .order(by: "createdAt", descending: true)
             .getDocuments()
         
-        return snapshot.documents.compactMap { document in
-            let data = document.data()
-            
-            var medication = Medication(
-                id: document.documentID,
-                userId: data["userId"] as? String,
-                name: data["name"] as? String ?? "",
-                dosage: data["dosage"] as? String ?? "",
-                frequency: data["frequency"] as? String ?? "",
-                timing: data["timing"] as? String,
-                route: data["route"] as? String,
-                laterality: data["laterality"] as? String,
-                duration: data["duration"] as? String,
-                instructions: data["instructions"] as? String,
-                fullInstructions: data["fullInstructions"] as? String,
-                isActive: data["isActive"] as? Bool ?? true,
-                discontinuationReason: data["discontinuationReason"] as? String,
-                createdAt: nil,
-                updatedAt: nil,
-                discontinuedDate: nil
-            )
-            
-            // Convert Timestamps to Dates
-            if let createdAtTimestamp = data["createdAt"] as? Timestamp {
-                medication.createdAt = createdAtTimestamp.dateValue()
-            }
-            if let updatedAtTimestamp = data["updatedAt"] as? Timestamp {
-                medication.updatedAt = updatedAtTimestamp.dateValue()
-            }
-            if let discontinuedDateTimestamp = data["discontinuedDate"] as? Timestamp {
-                medication.discontinuedDate = discontinuedDateTimestamp.dateValue()
-            }
-            
-            return medication
-        }
+        return snapshot.documents.map { decodeMedication($0.data(), documentId: $0.documentID) }
     }
     
     func checkMedicationExists(userId: String, medicationName: String) async throws -> Bool {
@@ -634,36 +584,7 @@ class OpenCareFirebaseService: ObservableObject {
         
         guard let document = snapshot.documents.first else { return nil }
         
-        let data = document.data()
-        
-        var medication = Medication(
-            id: document.documentID,
-            userId: data["userId"] as? String,
-            name: data["name"] as? String ?? "",
-            dosage: data["dosage"] as? String ?? "",
-            frequency: data["frequency"] as? String ?? "",
-            timing: data["timing"] as? String,
-            route: data["route"] as? String,
-            laterality: data["laterality"] as? String,
-            duration: data["duration"] as? String,
-            instructions: data["instructions"] as? String,
-            fullInstructions: data["fullInstructions"] as? String,
-            isActive: data["isActive"] as? Bool ?? true,
-            discontinuationReason: data["discontinuationReason"] as? String,
-            createdAt: nil,
-            updatedAt: nil,
-            discontinuedDate: nil
-        )
-        
-        // Convert Timestamps to Dates
-        if let createdAtTimestamp = data["createdAt"] as? Timestamp {
-            medication.createdAt = createdAtTimestamp.dateValue()
-        }
-        if let updatedAtTimestamp = data["updatedAt"] as? Timestamp {
-            medication.updatedAt = updatedAtTimestamp.dateValue()
-        }
-        
-        return medication
+        return decodeMedication(document.data(), documentId: document.documentID)
     }
     
     func updateMedication(medicationId: String, updates: [String: Any]) async throws {
@@ -716,26 +637,7 @@ class OpenCareFirebaseService: ObservableObject {
             .getDocuments()
         
         return snapshot.documents.compactMap { document in
-            let data = document.data()
-            
-            var action = MedicationAction(
-                id: document.documentID,
-                visitId: data["visitId"] as? String ?? "",
-                medicationId: data["medicationId"] as? String,
-                action: MedicationActionType(rawValue: data["action"] as? String ?? "continue") ?? .continued,
-                medicationName: data["medicationName"] as? String ?? "",
-                genericReference: data["genericReference"] as? String,
-                reason: data["reason"] as? String,
-                newInstructions: data["newInstructions"] as? String,
-                createdAt: nil
-            )
-            
-            // Convert Timestamps to Dates
-            if let createdAtTimestamp = data["createdAt"] as? Timestamp {
-                action.createdAt = createdAtTimestamp.dateValue()
-            }
-            
-            return action
+            decodeMedicationAction(document.data(), documentId: document.documentID)
         }
     }
     
@@ -746,26 +648,7 @@ class OpenCareFirebaseService: ObservableObject {
             .getDocuments()
         
         return snapshot.documents.compactMap { document in
-            let data = document.data()
-            
-            var action = MedicationAction(
-                id: document.documentID,
-                visitId: data["visitId"] as? String ?? "",
-                medicationId: data["medicationId"] as? String,
-                action: MedicationActionType(rawValue: data["action"] as? String ?? "continue") ?? .continued,
-                medicationName: data["medicationName"] as? String ?? "",
-                genericReference: data["genericReference"] as? String,
-                reason: data["reason"] as? String,
-                newInstructions: data["newInstructions"] as? String,
-                createdAt: nil
-            )
-            
-            // Convert Timestamps to Dates
-            if let createdAtTimestamp = data["createdAt"] as? Timestamp {
-                action.createdAt = createdAtTimestamp.dateValue()
-    }
-    
-            return action
+            decodeMedicationAction(document.data(), documentId: document.documentID)
         }
     }
     

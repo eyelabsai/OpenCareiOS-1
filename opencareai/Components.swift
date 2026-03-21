@@ -666,4 +666,82 @@ struct DeleteAccountConfirmationView: View {
             authViewModel.errorMessage = nil
         }
     }
-} 
+}
+
+// MARK: - Chronic conditions → profile (web `chronicConditionsModal` parity)
+
+struct ChronicConditionPromptItem: Identifiable, Hashable {
+    let name: String
+    let isNew: Bool
+    var isSelected: Bool
+    var id: String { name }
+}
+
+struct ChronicConditionsMergeSheet: View {
+    @Binding var items: [ChronicConditionPromptItem]
+    @Binding var isPresented: Bool
+    let onMerge: ([String]) async -> Void
+    
+    /// Mirrors web `showChronicConditionsModal`: list visit conditions; mark new vs already on profile.
+    static func buildItems(from visitConditions: [String], profile: [String]) -> [ChronicConditionPromptItem] {
+        let existingLower = Set(profile.map { $0.lowercased() })
+        return visitConditions.map { raw in
+            let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            let isNew = !existingLower.contains(name.lowercased())
+            return ChronicConditionPromptItem(name: name, isNew: isNew, isSelected: isNew)
+        }
+    }
+    
+    var body: some View {
+        NavigationView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("We found chronic conditions mentioned in your visit. Add them to your profile?")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach($items) { $item in
+                            HStack(alignment: .top, spacing: 12) {
+                                Toggle("", isOn: $item.isSelected)
+                                    .labelsHidden()
+                                    .disabled(!item.isNew)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.name)
+                                        .font(.body)
+                                        .fontWeight(.medium)
+                                    Text(item.isNew ? "New" : "Already added")
+                                        .font(.caption)
+                                        .foregroundColor(item.isNew ? .green : .secondary)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                }
+                
+                HStack(spacing: 12) {
+                    Button("Skip All") {
+                        isPresented = false
+                    }
+                    .buttonStyle(.bordered)
+                    
+                    Button("Add Selected") {
+                        let selected = items.filter { $0.isNew && $0.isSelected }.map { $0.name }
+                        Task {
+                            await onMerge(selected)
+                            await MainActor.run { isPresented = false }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding()
+            .navigationTitle("Chronic conditions")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}

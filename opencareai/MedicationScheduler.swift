@@ -52,11 +52,16 @@ class MedicationScheduler: ObservableObject {
     private let currentDate = Date()
     
     // Parse tapering instructions and create timeline
-    func parseTaperingRegimen(medication: Medication) -> MedicationSchedule? {
+    func parseTaperingRegimen(medication: Medication, visitDate: Date? = nil) -> MedicationSchedule? {
         let fullInstructions = medication.fullInstructions ?? ""
         
-        // Smart start date detection
-        let actualStartDate = determineStartDate(fullInstructions: fullInstructions, startDate: medication.createdAt, visitDate: medication.createdAt)
+        let visitAnchor = visitDate ?? medication.startDate ?? medication.createdAt ?? Date()
+        // Smart start date detection (matches web: `startDate` + `visitDate` from medication / visit)
+        let actualStartDate = determineStartDate(
+            fullInstructions: fullInstructions,
+            startDate: medication.startDate,
+            visitDate: visitAnchor
+        )
         
         let timeline = [MedicationPhase]()
         
@@ -506,12 +511,12 @@ class MedicationScheduler: ObservableObject {
         let classification = classifyMedicationType(medication: medication)
         
         if classification.type == "tapering" {
-            return parseTaperingRegimen(medication: medication)
+            let anchor = medication.startDate ?? medication.createdAt ?? Date()
+            return parseTaperingRegimen(medication: medication, visitDate: anchor)
         }
         
         if classification.type == "short-term" {
-            // Use createdAt if available, otherwise fall back to current date
-            let startDate = medication.createdAt ?? Date()
+            let startDate = medication.startDate ?? medication.createdAt ?? Date()
             return createSimpleSchedule(medication: medication, startDate: startDate)
         }
         
