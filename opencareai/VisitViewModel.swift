@@ -62,6 +62,50 @@ class VisitViewModel: ObservableObject {
         }
     }
     
+    /// Shared save path aligned with web `saveVisitAndMedications`: warnings → create visit → stop/modify → add new meds.
+    @MainActor
+    private func persistVisitFromSummary(_ summary: VisitSummary, userId: String, transcript: String) async throws {
+        let actions = summary.medicationActions
+        if !actions.isEmpty {
+            let warnings = await medicationViewModel.evaluateMedicationActionStopModifyWarnings(actions: actions)
+            if !warnings.isEmpty {
+                throw NSError(
+                    domain: "OpenCare",
+                    code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: warnings.joined(separator: "\n")]
+                )
+            }
+        }
+        let visitDate = VisitSummaryDate.resolvedDate(from: summary.date)
+        let iso = VisitSummaryDate.isoDateString(from: visitDate)
+        let setting = VisitSetting(rawValue: summary.setting ?? "clinic") ?? .clinic
+        
+        var visit = Visit()
+        visit.userId = userId
+        visit.date = visitDate
+        visit.specialty = summary.specialty
+        visit.summary = summary.summary
+        visit.tldr = summary.tldr
+        visit.medications = summary.medications
+        visit.medicationActions = actions
+        visit.chronicConditions = summary.chronicConditions
+        visit.createdAt = Date()
+        visit.updatedAt = Date()
+        visit.setting = setting
+        visit.isDischarge = summary.isDischarge ?? false
+        visit.startedAt = Date()
+        visit.transcript = transcript.isEmpty ? nil : transcript
+        
+        try await firebaseService.createVisit(visit, userId: userId)
+        await medicationViewModel.applyStopAndModifyFromVisitActions(actions)
+        for var med in summary.medications {
+            med.startDate = visitDate
+            med.visitDate = iso
+            await medicationViewModel.createMedication(med)
+        }
+        await loadVisitsAsync()
+    }
+    
     // MARK: - Load Visits
     @MainActor
     func loadVisitsAsync() async {
@@ -95,14 +139,27 @@ class VisitViewModel: ObservableObject {
         errorMessage = nil
         
         do {
+            let actions = visit.medicationActions ?? []
+            if !actions.isEmpty {
+                let warnings = await medicationViewModel.evaluateMedicationActionStopModifyWarnings(actions: actions)
+                if !warnings.isEmpty {
+                    errorMessage = warnings.joined(separator: "\n")
+                    isLoading = false
+                    return
+                }
+            }
             try await firebaseService.createVisit(visit, userId: userId)
-            // Add all medications from the visit to the user's global medications collection
+            await medicationViewModel.applyStopAndModifyFromVisitActions(actions)
             if let meds = visit.medications {
-                for med in meds {
+                let visitDate = visit.date ?? Date()
+                let iso = VisitSummaryDate.isoDateString(from: visitDate)
+                for var med in meds {
+                    med.startDate = visitDate
+                    med.visitDate = iso
                     await medicationViewModel.createMedication(med)
                 }
             }
-            await loadVisitsAsync() // Reload visits after creation
+            await loadVisitsAsync()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -120,66 +177,30 @@ class VisitViewModel: ObservableObject {
         
         isLoading = true
         errorMessage = nil
+        defer { isLoading = false }
         
         do {
-            // Process audio through API
             let visitSummary = try await apiService.processVisit(audioData: audioData, filename: filename)
+            let transcript = visitSummary.transcript ?? ""
+            try await persistVisitFromSummary(visitSummary, userId: userId, transcript: transcript)
             
-            // Convert VisitSummary to Visit
             var newVisit = Visit()
             newVisit.userId = userId
             newVisit.summary = visitSummary.summary
             newVisit.tldr = visitSummary.tldr
             newVisit.specialty = visitSummary.specialty
             newVisit.medications = visitSummary.medications
-            // Convert medication action strings to MedicationAction objects
-            let medicationActions = visitSummary.medicationActions.compactMap { actionString -> MedicationAction? in
-                guard let actionType = MedicationActionType(rawValue: actionString) else { return nil }
-                return MedicationAction(
-                    id: UUID().uuidString,
-                    visitId: "", // Will be set by Firebase
-                    medicationId: nil,
-                    action: actionType,
-                    medicationName: "Unknown", // Default value
-                    genericReference: nil,
-                    reason: nil,
-                    newInstructions: nil,
-                    createdAt: Date()
-                )
-            }
-            newVisit.medicationActions = medicationActions
+            newVisit.medicationActions = visitSummary.medicationActions
             newVisit.chronicConditions = visitSummary.chronicConditions
-            
-            // Parse date
-            if visitSummary.date == "TODAY" {
-                newVisit.date = Date()
-            } else {
-                // Try to parse the date string
-                let formatter = DateFormatter()
-                formatter.dateStyle = .medium
-                newVisit.date = formatter.date(from: visitSummary.date) ?? Date()
-            }
-            
-            // Save to Firebase
-            try await firebaseService.createVisit(newVisit, userId: userId)
-            
-            // Add all medications from the visit to the user's global medications collection
-            if let meds = newVisit.medications {
-                for med in meds {
-                    await medicationViewModel.createMedication(med)
-                }
-            }
-            
-            // Reload visits
-            await loadVisitsAsync()
-            
+            newVisit.date = VisitSummaryDate.resolvedDate(from: visitSummary.date)
+            newVisit.setting = VisitSetting(rawValue: visitSummary.setting ?? "clinic")
+            newVisit.isDischarge = visitSummary.isDischarge
+            newVisit.transcript = transcript.isEmpty ? nil : transcript
             return newVisit
         } catch {
             errorMessage = error.localizedDescription
             return nil
         }
-        
-        isLoading = false
     }
     
     // MARK: - Update Visit
@@ -305,30 +326,23 @@ class VisitViewModel: ObservableObject {
         errorMessage = nil
     }
     
+    /// Clears the in-progress summary so a new recording or processing pass does not show stale content.
+    @MainActor
+    func clearPendingSummary() {
+        visitSummary = nil
+        transcript = ""
+        errorMessage = nil
+    }
+    
     // MARK: - Summary Generation
     @MainActor
     func generateSummaryFromTranscript() async {
         guard !transcript.isEmpty else { return }
         
         do {
-            // Use enhanced summarization with verification (matching web app functionality)
-            let (summaryResponse, medications, actions) = try await apiService.summarizeTranscriptWithVerification(transcript)
-            
-            // Convert MedicationAction array to [String] of action raw values
-            let medicationActionStrings: [String] = actions.map { $0.action.rawValue }
-            
-            let visitSummary = VisitSummary(
-                summary: summaryResponse.summary ?? "",
-                tldr: summaryResponse.tldr ?? "",
-                specialty: summaryResponse.specialty ?? "",
-                date: summaryResponse.date ?? "",
-                medications: medications,
-                medicationActions: medicationActionStrings,
-                chronicConditions: summaryResponse.chronicConditions ?? []
-            )
-            
-            self.visitSummary = visitSummary
-            
+            var built = try await apiService.summarizeTranscriptWithVerification(transcript).0
+            built.transcript = transcript
+            self.visitSummary = built
         } catch {
             errorMessage = "Failed to generate summary: \(error.localizedDescription)"
         }
@@ -343,24 +357,15 @@ class VisitViewModel: ObservableObject {
             return
         }
         
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+        
         do {
-            let visit = Visit(
-                userId: userId,
-                date: Date(),
-                specialty: summary.specialty,
-                summary: summary.summary,
-                tldr: summary.tldr,
-                medications: summary.medications,
-                medicationActions: nil, // Not available from summary
-                chronicConditions: summary.chronicConditions,
-                createdAt: Date(),
-                updatedAt: Date()
-            )
-            
-            try await firebaseService.createVisit(visit, userId: userId)
-            
+            let tx = summary.transcript ?? transcript
+            try await persistVisitFromSummary(summary, userId: userId, transcript: tx)
         } catch {
-            errorMessage = "Failed to save visit: \(error.localizedDescription)"
+            errorMessage = error.localizedDescription
         }
     }
     
@@ -418,23 +423,14 @@ class VisitViewModel: ObservableObject {
             
             // Step 2: Summarize transcript
             print("🔊 Step 2: Summarizing transcript...")
-            let (summarizationResponse, medications, actions) = try await apiService.summarizeTranscriptWithVerification(transcriptText)
+            var built = try await apiService.summarizeTranscriptWithVerification(transcriptText).0
+            built.transcript = transcriptText
             progressValue = 0.9
             
-            print("🔊 Summarization response received: \(summarizationResponse)")
+            print("🔊 Summarization response received: \(built.summary.prefix(80))…")
             
-            // Step 3: Create VisitSummary (DO NOT SAVE YET)
-            let medicationActionStrings = actions.map { $0.action.rawValue }
-            
-            self.visitSummary = VisitSummary(
-                summary: summarizationResponse.summary ?? "",
-                tldr: summarizationResponse.tldr ?? "",
-                specialty: summarizationResponse.specialty ?? "General",
-                date: summarizationResponse.date ?? "TODAY",
-                medications: summarizationResponse.medications ?? [],
-                medicationActions: medicationActionStrings,
-                chronicConditions: summarizationResponse.chronicConditions ?? []
-            )
+            // Step 3: VisitSummary (DO NOT SAVE YET)
+            self.visitSummary = built
             
             print("🔊 Visit summary created: \(self.visitSummary?.summary ?? "No summary")")
             
@@ -464,42 +460,26 @@ class VisitViewModel: ObservableObject {
         }
         
         isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
         
         do {
-            print("🔊 Saving visit to Firebase...")
-            let visit = Visit(
-                userId: userId,
-                date: Date(),
-                specialty: summary.specialty,
-                summary: summary.summary,
-                tldr: summary.tldr,
-                medications: summary.medications,
-                medicationActions: nil,
-                chronicConditions: summary.chronicConditions,
-                createdAt: Date(),
-                updatedAt: Date()
-            )
-            
-            try await firebaseService.createVisit(visit, userId: userId)
-            
-            // Add medications to global collection
-            print("🔊 Adding medications to global collection...")
-            for med in summary.medications {
-                await medicationViewModel.createMedication(med)
-            }
-            
-            // Reload visits
-            await loadVisitsAsync()
-            
+            let tx = summary.transcript ?? transcript
+            try await persistVisitFromSummary(summary, userId: userId, transcript: tx)
             currentStep = .completed
             showingSuccess = true
-            
         } catch {
-            print("❌ Error saving visit: \(error)")
             errorMessage = error.localizedDescription
         }
-        
-        isLoading = false
+    }
+    
+    /// Merge medication verification edits into the pending summary before explicit save (web: confirm then save).
+    @MainActor
+    func applyVerifiedMedicationData(medications: [Medication], medicationActions: [MedicationAction]) {
+        guard var summary = visitSummary else { return }
+        summary.medications = medications
+        summary.medicationActions = medicationActions
+        visitSummary = summary
     }
     
     func resetRecording() {

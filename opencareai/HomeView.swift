@@ -149,6 +149,7 @@ struct HomeView: View {
                 NewVisitView()
                     .environmentObject(visitViewModel)
                     .environmentObject(audioRecorder)
+                    .environmentObject(userViewModel)
             }
             .onAppear {
                 Task {
@@ -166,9 +167,12 @@ struct HomeView: View {
 struct NewVisitView: View {
     @EnvironmentObject var visitViewModel: VisitViewModel
     @EnvironmentObject var audioRecorder: AudioRecorder
+    @EnvironmentObject var userViewModel: UserViewModel
     @Environment(\.dismiss) private var dismiss
     
     @State private var showingMedicationVerification = false
+    @State private var showChronicConditionsSheet = false
+    @State private var chronicConditionsPromptItems: [ChronicConditionPromptItem] = []
     @State private var showingProcessingSteps = false
     @State private var currentProcessingStep = 0
     @State private var detectedMedications: [Medication] = []
@@ -342,6 +346,14 @@ struct NewVisitView: View {
                                     await visitViewModel.saveVisitFromSummary()
                                     dismiss()
                                 }
+                            },
+                            onDiscard: {
+                                visitViewModel.resetRecording()
+                                showingMedicationVerification = false
+                                detectedMedications = []
+                                detectedMedicationActions = []
+                                showingProcessingSteps = false
+                                currentStep = .ready
                             }
                         )
                     }
@@ -367,7 +379,44 @@ struct NewVisitView: View {
                 }
             }
         }
+        .sheet(isPresented: $showChronicConditionsSheet, onDismiss: {
+            openMedicationVerificationIfNeeded()
+        }) {
+            ChronicConditionsMergeSheet(
+                items: $chronicConditionsPromptItems,
+                isPresented: $showChronicConditionsSheet,
+                onMerge: { selected in
+                    await userViewModel.mergeChronicConditionsFromVisit(selected)
+                }
+            )
+        }
         .navigationViewStyle(.stack)
+    }
+    
+    /// After summary is ready: offer profile merge for new chronic conditions (web `showChronicConditionsModal`), then medication verification.
+    private func openMedicationVerificationIfNeeded() {
+        guard let summary = visitViewModel.visitSummary else { return }
+        detectedMedications = summary.medications
+        detectedMedicationActions = summary.medicationActions
+        if !detectedMedications.isEmpty || !detectedMedicationActions.isEmpty {
+            showingMedicationVerification = true
+        }
+    }
+    
+    private func processAfterSummaryReady() async {
+        await userViewModel.fetchUserProfile()
+        guard let summary = visitViewModel.visitSummary else { return }
+        if summary.chronicConditions.isEmpty {
+            openMedicationVerificationIfNeeded()
+            return
+        }
+        let items = ChronicConditionsMergeSheet.buildItems(from: summary.chronicConditions, profile: userViewModel.user.chronicConditions)
+        if items.contains(where: { $0.isNew }) {
+            chronicConditionsPromptItems = items
+            showChronicConditionsSheet = true
+        } else {
+            openMedicationVerificationIfNeeded()
+        }
     }
     
     private func handleRecordingAction() {
@@ -382,7 +431,12 @@ struct NewVisitView: View {
                 }
             }
         } else {
-            // Start recording
+            // Start a fresh recording: clear any previous summary/transcript/UI state
+            visitViewModel.resetRecording()
+            showingMedicationVerification = false
+            detectedMedications = []
+            detectedMedicationActions = []
+            showingProcessingSteps = false
             currentStep = .ready
             Task {
                 await audioRecorder.startRecording()
@@ -391,6 +445,9 @@ struct NewVisitView: View {
     }
     
     private func processAudioWithSteps(_ audioData: Data) async {
+        await MainActor.run {
+            visitViewModel.clearPendingSummary()
+        }
         // Step 1: Transcribing
         currentStep = .transcribing
         try? await Task.sleep(nanoseconds: 800_000_000) // 0.8 seconds
@@ -408,37 +465,14 @@ struct NewVisitView: View {
         
         // Actually process the audio
         await visitViewModel.processAudioRecording(audioData)
-        
-        // Check if we have medications to verify
-        if let summary = visitViewModel.visitSummary {
-            detectedMedications = summary.medications
-            // Convert medication action strings to MedicationAction objects
-            detectedMedicationActions = summary.medicationActions.compactMap { actionString in
-                MedicationAction(
-                    id: UUID().uuidString,
-                    visitId: nil,
-                    medicationId: nil,
-                    action: MedicationActionType(rawValue: actionString) ?? .continued,
-                    medicationName: actionString,
-                    genericReference: nil,
-                    reason: nil,
-                    newInstructions: nil,
-                    createdAt: Date()
-                )
-            }
-            
-            if !detectedMedications.isEmpty || !detectedMedicationActions.isEmpty {
-                showingMedicationVerification = true
-            }
-        }
+        await processAfterSummaryReady()
         
         currentStep = .complete
         showingProcessingSteps = false
     }
     
     private func processMedicationVerification(medications: [Medication], actions: [MedicationAction]) async {
-        // Save the verified medications and actions
-        // This would integrate with your medication verification logic
+        visitViewModel.applyVerifiedMedicationData(medications: medications, medicationActions: actions)
         showingMedicationVerification = false
     }
     
@@ -603,10 +637,13 @@ struct MedicationVerificationView: View {
                 .buttonStyle(.bordered)
                 
                 Button("Confirm & Continue") {
-                    let confirmedActionsArray = medicationActions.enumerated().compactMap { index, action in
-                        confirmedActions.contains(index) ? action : nil
+                    let mergedActions: [MedicationAction] = medicationActions.enumerated().compactMap { index, action in
+                        if action.action.isStopLike {
+                            return confirmedActions.contains(index) ? action : nil
+                        }
+                        return action
                     }
-                    onConfirm(editableMedications, confirmedActionsArray)
+                    onConfirm(editableMedications, mergedActions)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(hasUnconfirmedStopActions())
@@ -618,8 +655,8 @@ struct MedicationVerificationView: View {
     }
     
     private func hasUnconfirmedStopActions() -> Bool {
-        return medicationActions.enumerated().contains { index, action in
-            action.action == .stop && !confirmedActions.contains(index)
+        medicationActions.enumerated().contains { index, action in
+            action.action.isStopLike && !confirmedActions.contains(index)
         }
     }
 }
@@ -648,7 +685,7 @@ struct MedicationActionRow: View {
             
             Spacer()
             
-            if action.action == .stop {
+            if action.action.isStopLike {
                 if isConfirmed {
                     Text("✅ Confirmed")
                         .font(.caption)
@@ -671,7 +708,7 @@ struct MedicationActionRow: View {
     
     private var actionIcon: String {
         switch action.action {
-        case .stop: return "⏹️"
+        case .stop, .discontinue: return "⏹️"
         case .start: return "▶️"
         case .modify: return "✏️"
         case .continued: return "🔄"
@@ -748,6 +785,9 @@ struct MedicationRow: View {
 struct NewVisitSummaryView: View {
     let summary: VisitSummary
     let onSave: () -> Void
+    let onDiscard: () -> Void
+    
+    @State private var showDiscardConfirm = false
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -790,15 +830,34 @@ struct NewVisitSummaryView: View {
                 }
             }
             
-            Button("Save Visit & Return to Dashboard") {
-                onSave()
+            VStack(spacing: 12) {
+                Button("Confirm & save visit") {
+                    onSave()
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                
+                Button("Delete recording") {
+                    showDiscardConfirm = true
+                }
+                .buttonStyle(.bordered)
+                .tint(.red)
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
         }
         .padding()
         .background(Color(.systemGray6))
         .cornerRadius(12)
+        .confirmationDialog(
+            "Discard this visit?",
+            isPresented: $showDiscardConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) { onDiscard() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This visit will not be saved. You can record again.")
+        }
     }
 }
 
