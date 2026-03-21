@@ -179,6 +179,10 @@ struct NewVisitView: View {
     @State private var detectedMedicationActions: [MedicationAction] = []
     @State private var currentStep: ProcessingStep = .ready
     
+    // MARK: - Test Mode (for development/testing)
+    @State private var showTestInput = false
+    @State private var testTranscript: String = ""
+    
     enum ProcessingStep {
         case ready, transcribing, analyzing, extractingMedications, generatingSummary, complete
         
@@ -320,6 +324,62 @@ struct NewVisitView: View {
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
+                    
+                    // MARK: - Test Mode Input (for development)
+                    VStack(spacing: 12) {
+                        Button(action: { showTestInput.toggle() }) {
+                            HStack {
+                                Image(systemName: showTestInput ? "chevron.down" : "chevron.right")
+                                Text("Test Mode (Type Transcript)")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Spacer()
+                            }
+                            .foregroundColor(.orange)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                        
+                        if showTestInput {
+                            VStack(spacing: 12) {
+                                Text("Enter transcript text to simulate audio recording:")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                
+                                TextEditor(text: $testTranscript)
+                                    .frame(minHeight: 120)
+                                    .padding(8)
+                                    .background(Color(.systemGray6))
+                                    .cornerRadius(8)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                                    )
+                                
+                                Button(action: submitTestTranscript) {
+                                    HStack {
+                                        Image(systemName: "play.fill")
+                                        Text("Process as Transcript")
+                                    }
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .background(testTranscript.isEmpty ? Color.orange.opacity(0.5) : Color.orange)
+                                    .cornerRadius(10)
+                                }
+                                .disabled(testTranscript.isEmpty || visitViewModel.isLoading)
+                            }
+                            .padding()
+                            .background(Color.orange.opacity(0.05))
+                            .cornerRadius(12)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(Color.orange.opacity(0.2), lineWidth: 1)
+                            )
+                        }
+                    }
+                    .padding(.horizontal)
                     
                     // Medication Verification Section
                     if showingMedicationVerification {
@@ -474,6 +534,56 @@ struct NewVisitView: View {
     private func processMedicationVerification(medications: [Medication], actions: [MedicationAction]) async {
         visitViewModel.applyVerifiedMedicationData(medications: medications, medicationActions: actions)
         showingMedicationVerification = false
+    }
+    
+    /// Submit typed transcript for testing (skips audio recording)
+    private func submitTestTranscript() {
+        guard !testTranscript.isEmpty else { return }
+        
+        // Clear previous state
+        visitViewModel.resetRecording()
+        showingMedicationVerification = false
+        detectedMedications = []
+        detectedMedicationActions = []
+        
+        // Show processing UI
+        currentStep = .transcribing
+        showingProcessingSteps = true
+        
+        Task {
+            await MainActor.run {
+                visitViewModel.clearPendingSummary()
+            }
+            
+            // Step 1: Transcribing (simulated - we already have the text)
+            currentStep = .transcribing
+            visitViewModel.transcript = testTranscript
+            try? await Task.sleep(nanoseconds: 400_000_000) // 0.4 seconds
+            
+            // Step 2: Analyzing
+            currentStep = .analyzing
+            try? await Task.sleep(nanoseconds: 400_000_000) // 0.4 seconds
+            
+            // Step 3: Extracting medications
+            currentStep = .extractingMedications
+            try? await Task.sleep(nanoseconds: 300_000_000) // 0.3 seconds
+            
+            // Step 4: Generating summary
+            currentStep = .generatingSummary
+            
+            // Actually process the transcript (skip transcription API call)
+            await visitViewModel.generateSummaryFromTranscript()
+            await processAfterSummaryReady()
+            
+            currentStep = .complete
+            showingProcessingSteps = false
+            
+            // Clear test input
+            await MainActor.run {
+                testTranscript = ""
+                showTestInput = false
+            }
+        }
     }
     
     private func formatTime(_ timeInterval: TimeInterval) -> String {
